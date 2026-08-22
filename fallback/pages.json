@@ -1,0 +1,23 @@
+{
+  "charter_version": "lantern-charter-1.0.0",
+  "pages": [
+    {
+      "id": "closing_sleep",
+      "text": "And by then, everyone was already asleep. The lamp went soft and yellow, the blanket went warm, and outside the window the whole garden was quiet. Goodnight, everyone. Goodnight.",
+      "image_prompt": "A cosy dark bedroom with a small warm lamp, a rounded bed with a thick blanket, a window with a quiet garden outside. Soft gouache children's picture-book illustration, warm lamplight palette, thick confident outlines, flat shapes, gentle depth, no text, no letters, no words, no watermark, centered composition, cozy.",
+      "image_path": "fallback/closing_sleep.png"
+    },
+    {
+      "id": "closing_tea",
+      "text": "So they all went home the slow way, and there was warm milk, and somebody found the last biscuit and shared it. Everything that was lost was back where it belonged, and everybody yawned at once.",
+      "image_prompt": "A small kitchen at night, mugs of warm milk on a wooden table, friendly animals yawning together. Soft gouache children's picture-book illustration, warm lamplight palette, thick confident outlines, flat shapes, gentle depth, no text, no letters, no words, no watermark, centered composition, cozy.",
+      "image_path": "fallback/closing_tea.png"
+    },
+    {
+      "id": "closing_stars",
+      "text": "They sat on the step and counted the stars until the numbers got muddled and nobody minded. The night was kind. Tomorrow there would be more of it, and that was a good thing to fall asleep on.",
+      "image_prompt": "Two small friends sitting on a doorstep under a wide starry sky, warm light spilling from the door behind them. Soft gouache children's picture-book illustration, warm lamplight palette, thick confident outlines, flat shapes, gentle depth, no text, no letters, no words, no watermark, centered composition, cozy.",
+      "image_path": "fallback/closing_stars.png"
+    }
+  ]
+}

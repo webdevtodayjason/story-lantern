@@ -1,0 +1,497 @@
+<!--
+  Story Lantern — the parent log.
+
+  Self-contained: no framework, no CDN, no build step. Served by lantern.py at /parent.
+
+  Data contract (see the note at the bottom of this file, which is also rendered on the
+  page when the endpoint is missing):
+
+    GET  /api/parent/data          -> the JSON below
+    POST /api/parent/story/<id>/delete   (or DELETE /api/parent/story/<id>)
+
+  This page is deliberately plain. It is not a dashboard and it is not selling anything.
+  It exists so a parent can read exactly what their child asked for, exactly what the
+  box wrote back, and exactly what the safety layer did about it — including the text it
+  refused to show. Nothing here is sanitised.
+-->
+<title>Story Lantern — Parent Log</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --paper:#faf7f1; --ink:#26221d; --muted:#6d675e; --rule:#e3ddd2;
+    --card:#fffdf9; --shadow:0 1px 2px rgba(40,34,26,.06), 0 8px 24px rgba(40,34,26,.05);
+    --allow:#3f7a52; --allow-bg:#eaf3ec;
+    --soft:#8a6a1f;  --soft-bg:#faf1dc;
+    --block:#9d3a34; --block-bg:#fbeceb;
+    --unver:#6b5aa6; --unver-bg:#f0edf9;
+    --accent:#b3763a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#17150f; --ink:#ece6da; --muted:#9a9386; --rule:#302b22;
+      --card:#1e1b15; --shadow:0 1px 2px rgba(0,0,0,.4);
+      --allow:#8fc39f; --allow-bg:#1b2a1f;
+      --soft:#e0bb6a;  --soft-bg:#2b2415;
+      --block:#e8938c; --block-bg:#2e1a19;
+      --unver:#b3a6e0; --unver-bg:#221e2f;
+      --accent:#d69a5c;
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font:16px/1.55 ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap { max-width:52rem; margin:0 auto; padding:2rem 1.15rem 6rem; }
+  header { border-bottom:1px solid var(--rule); padding-bottom:1.4rem; margin-bottom:1.6rem; }
+  h1 { font-size:1.55rem; margin:0 0 .35rem; letter-spacing:.01em; }
+  .sub { color:var(--muted); font-size:.94rem; margin:0; }
+  .meta { color:var(--muted); font-size:.8rem; margin-top:.8rem;
+          font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .summary { display:flex; flex-wrap:wrap; gap:.5rem; margin:1.2rem 0 0; }
+  .stat { background:var(--card); border:1px solid var(--rule); border-radius:.5rem;
+          padding:.5rem .75rem; min-width:6.2rem; box-shadow:var(--shadow); }
+  .stat b { display:block; font-size:1.3rem; font-weight:600; }
+  .stat span { font-size:.72rem; color:var(--muted); text-transform:uppercase;
+               letter-spacing:.06em; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center;
+              margin:1.4rem 0 .4rem; font-size:.88rem; color:var(--muted); }
+  .controls label { display:flex; gap:.35rem; align-items:center; cursor:pointer; }
+  button { font:inherit; font-size:.85rem; cursor:pointer; border-radius:.4rem;
+           border:1px solid var(--rule); background:var(--card); color:var(--ink);
+           padding:.32rem .7rem; }
+  button:hover { border-color:var(--muted); }
+  button.danger { color:var(--block); border-color:var(--block); background:transparent; }
+  button.danger:hover { background:var(--block-bg); }
+
+  article.story { background:var(--card); border:1px solid var(--rule); border-radius:.6rem;
+                  padding:1.15rem 1.2rem; margin:1rem 0; box-shadow:var(--shadow); }
+  .story h2 { font-size:1.18rem; margin:0 0 .2rem; }
+  .story .when { color:var(--muted); font-size:.8rem;
+                 font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .asked { margin:.9rem 0 0; padding:.7rem .85rem; border-left:3px solid var(--accent);
+           background:transparent; }
+  .asked .lbl { font-size:.7rem; letter-spacing:.07em; text-transform:uppercase;
+                color:var(--muted); display:block; margin-bottom:.2rem; }
+  .asked q { font-size:1.02rem; font-style:italic; }
+  .asked .also { font-size:.84rem; color:var(--muted); margin-top:.35rem; }
+
+  .badge { display:inline-block; font-size:.68rem; letter-spacing:.05em; font-weight:600;
+           text-transform:uppercase; padding:.16rem .45rem; border-radius:.28rem;
+           font-family:ui-monospace, SFMono-Regular, Menlo, monospace; vertical-align:.06em; }
+  .b-ALLOW { color:var(--allow); background:var(--allow-bg); }
+  .b-SOFTENED, .b-SOFTEN, .b-REDIRECT { color:var(--soft); background:var(--soft-bg); }
+  .b-BLOCKED_FALLBACK, .b-BLOCK, .b-DECLINE { color:var(--block); background:var(--block-bg); }
+  .b-ALLOW_UNVERIFIED, .b-UNVERIFIED, .b-ALLOW_UNCHECKED,
+  .b-UNVERIFIED_FALLBACK { color:var(--unver); background:var(--unver-bg); }
+
+  .pages { margin:1.1rem 0 0; }
+  .page { display:grid; grid-template-columns:128px 1fr; gap:.9rem;
+          padding:.85rem 0; border-top:1px solid var(--rule); }
+  .page img { width:128px; height:128px; object-fit:cover; border-radius:.35rem;
+              background:var(--paper); border:1px solid var(--rule); }
+  .noimg { width:128px; height:128px; border-radius:.35rem; border:1px dashed var(--rule);
+           display:flex; align-items:center; justify-content:center; text-align:center;
+           color:var(--muted); font-size:.7rem; padding:.4rem; }
+  .page .n { font-size:.72rem; color:var(--muted); letter-spacing:.06em;
+             text-transform:uppercase; }
+  .page p { margin:.25rem 0 .45rem; }
+  .why { font-size:.82rem; color:var(--muted); }
+  @media (max-width:34rem) {
+    .page { grid-template-columns:1fr; }
+    .page img, .noimg { width:100%; height:auto; aspect-ratio:1; }
+  }
+
+  details.events { margin-top:1rem; }
+  details.events summary { cursor:pointer; font-size:.86rem; color:var(--muted); }
+  .evtable { width:100%; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.82rem; margin-top:.6rem;
+          font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+  th, td { text-align:left; padding:.35rem .5rem; border-bottom:1px solid var(--rule);
+           vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:.72rem; text-transform:uppercase;
+       letter-spacing:.05em; }
+  .verbatim { white-space:pre-wrap; word-break:break-word; max-width:26rem;
+              color:var(--ink); }
+
+  .note { background:var(--card); border:1px solid var(--rule); border-left:3px solid var(--accent);
+          border-radius:.4rem; padding:.9rem 1rem; margin:1.6rem 0; font-size:.9rem; }
+  .note h3 { margin:0 0 .4rem; font-size:.95rem; }
+  .note p { margin:.4rem 0; }
+  code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85em;
+         background:var(--paper); padding:.05rem .3rem; border-radius:.25rem;
+         border:1px solid var(--rule); }
+  footer { margin-top:3rem; padding-top:1.2rem; border-top:1px solid var(--rule);
+           color:var(--muted); font-size:.84rem; }
+  .empty { color:var(--muted); padding:2.5rem 0; text-align:center; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Story Lantern — parent log</h1>
+    <p class="sub">Every story the lantern told, in the child's own words, with the
+      safety verdict on every page. Nothing on this page has been cleaned up.</p>
+    <div class="meta" id="meta">loading…</div>
+    <div class="summary" id="summary"></div>
+  </header>
+
+  <div class="controls">
+    <label><input type="checkbox" id="onlyFlagged"> Show only pages that were not a plain ALLOW</label>
+    <button id="refresh">Refresh</button>
+  </div>
+
+  <main id="stories"><div class="empty">loading…</div></main>
+
+  <div class="note">
+    <h3>What the verdicts mean</h3>
+    <p><span class="badge b-ALLOW">allow</span> The page passed the deterministic
+      blocklist and the independent classifier, and was read to your child as written.</p>
+    <p><span class="badge b-SOFTENED">softened</span> The first draft of this page failed
+      the safety check. It was thrown away and written again, gentler. The rejected draft
+      is in the events table below the story, verbatim.</p>
+    <p><span class="badge b-BLOCKED_FALLBACK">blocked_fallback</span> Two drafts failed
+      the safety check. The lantern read a pre-written safe page instead and the story
+      ended early. Your child heard a slightly short story; they did not see an error.</p>
+    <p><span class="badge b-UNVERIFIED_FALLBACK">unverified_fallback</span> Different
+      thing, and it is not about what was written. No draft failed — the classifier could
+      not be reached at all (the device was busy with something else, or a model was
+      unloaded), so nothing was ever reviewed. The lantern read a pre-written safe page
+      rather than an unchecked one, and the story ended early.</p>
+    <p><span class="badge b-ALLOW_UNVERIFIED">allow_unverified</span> The blocklist passed
+      but the classifier could not be reached, and this lantern is set to show the page
+      anyway (<code>LANTERN_ALLOW_UNVERIFIED=1</code>). The page was shown unreviewed.
+      Worth reading these ones yourself.</p>
+    <p><span class="badge b-ALLOW_UNCHECKED">allow_unchecked</span> The independent
+      classifier is switched OFF on this lantern (<code>--no-safety</code>, or
+      <code>safety_classifier: false</code> in config.json). The page passed the
+      deterministic blocklist only. That is a much weaker check than a plain
+      <span class="badge b-ALLOW">allow</span>, which is why it does not get one.</p>
+    <p><span class="badge b-DECLINE">decline</span> The lantern would not build a story
+      from what was asked, and said something kind instead. The exact request is logged.</p>
+  </div>
+
+  <footer>
+    <p>A local classifier will have false negatives. This log is not a substitute for a
+      parent in the house — it exists so you can catch what the classifier didn't.
+      Anyone who tells you a local model is unconditionally safe for a five-year-old is
+      selling something.</p>
+    <p id="charter"></p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+const API = "/api/parent/data";
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
+
+let DATA = { stories: [] };
+
+function fmtDate(s) {
+  if (!s) return "";
+  const d = new Date(s);
+  if (isNaN(d)) return String(s);
+  return d.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit"
+  });
+}
+
+function badge(v) {
+  const t = String(v || "ALLOW").toUpperCase();
+  return `<span class="badge b-${esc(t)}">${esc(t.toLowerCase())}</span>`;
+}
+
+// Every string on this page came out of a language model or a microphone, so all of it
+// is treated as hostile input: escaped for HTML, and URLs are whitelisted by scheme so a
+// page_path of "javascript:..." cannot become a clickable link.
+function safeUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return null;
+  if (/^\/(?!\/)/.test(s)) return s;                 // site-absolute
+  if (/^https?:\/\//i.test(s)) return s;             // explicit http(s)
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return null;   // any other scheme: refuse
+  return "/media/" + s.replace(/^\.+\//, "");        // plain relative path
+}
+
+// Tolerant about field names: different pieces of the pipeline may hand us
+// image_url or image_path, audio_url or audio_path.
+function media(page, story) {
+  const src = safeUrl(page.image_url || page.image_path);
+  if (!src) {
+    const why = page.image_blocked_reason
+      ? "illustration withheld: " + page.image_blocked_reason
+      : "no illustration";
+    return `<div class="noimg">${esc(why)}</div>`;
+  }
+  return `<img src="${esc(src)}" alt="Illustration for page ${esc(page.idx)}" loading="lazy">`;
+}
+
+function renderPage(p, story) {
+  const v = (p.safety_verdict || "ALLOW").toUpperCase();
+  const why = [];
+  if (p.safety_reason) why.push(esc(p.safety_reason));
+  if (p.regen_count) why.push(`regenerated ${p.regen_count}×`);
+  if (p.gen_ms) why.push(`${Math.round(p.gen_ms / 100) / 10}s to make`);
+  const au = safeUrl(p.audio_url || p.audio_path);
+  const audio = au
+    ? `<div class="why"><a href="${esc(au)}" rel="noopener">narration audio</a></div>` : "";
+  return `<div class="page" data-verdict="${esc(v)}">
+      ${media(p, story)}
+      <div>
+        <div class="n">Page ${esc(p.idx != null ? p.idx + 1 : "?")} ${badge(v)}</div>
+        <p>${esc(p.text)}</p>
+        ${why.length ? `<div class="why">${why.join(" · ")}</div>` : ""}
+        ${audio}
+      </div>
+    </div>`;
+}
+
+function renderEvents(events) {
+  if (!events || !events.length) return "";
+  const rows = events.map(e => `<tr>
+      <td>${esc((e.at || "").replace("T", " ").replace(/(\+00:00|Z)$/, ""))}</td>
+      <td>${esc(e.stage)}</td>
+      <td>${esc(e.page_idx != null ? e.page_idx + 1 : "—")}</td>
+      <td>${badge(e.verdict)}</td>
+      <td>${esc(e.reason)}</td>
+      <td class="verbatim">${esc(e.offending_text)}</td>
+    </tr>`).join("");
+  return `<details class="events">
+      <summary>${events.length} safety event${events.length === 1 ? "" : "s"} —
+        including the exact text that was held back</summary>
+      <div class="evtable"><table>
+        <tr><th>when</th><th>stage</th><th>page</th><th>verdict</th><th>reason</th>
+            <th>text, exactly as it was produced</th></tr>
+        ${rows}
+      </table></div>
+    </details>`;
+}
+
+function renderStory(s) {
+  const pages = (s.pages || []).slice().sort((a, b) => (a.idx || 0) - (b.idx || 0));
+  const asked = s.raw_transcript || s.request || "";
+  const corrected = s.corrected_transcript || "";
+  const extras = [];
+  if (corrected && corrected !== asked) extras.push("heard as: " + esc(corrected));
+  if (s.redirect_note) extras.push("the lantern said: " + esc(s.redirect_note));
+  if (s.status && s.status !== "finished") extras.push("status: " + esc(s.status));
+
+  return `<article class="story" data-id="${esc(s.id)}">
+      <h2>${esc(s.title || "Untitled story")}</h2>
+      <div class="when">${esc(fmtDate(s.created_at))} · ${esc(pages.length)} page${pages.length === 1 ? "" : "s"}</div>
+      <div class="asked">
+        <span class="lbl">What ${esc(s.child_name || "your child")} asked for</span>
+        <q>${esc(asked) || "<em>nothing was recorded</em>"}</q>
+        ${extras.length ? `<div class="also">${extras.join(" · ")}</div>` : ""}
+      </div>
+      <div class="pages">${pages.map(p => renderPage(p, s)).join("") ||
+        `<div class="why" style="padding-top:.8rem">No pages were finished for this story.</div>`}</div>
+      ${renderEvents(s.safety_events)}
+      <div style="margin-top:1rem"><button class="danger" data-del="${esc(s.id)}">Delete this story</button></div>
+    </article>`;
+}
+
+function summarise(stories) {
+  const c = { stories: stories.length, pages: 0, allow: 0, softened: 0, blocked: 0,
+              unverified: 0, unchecked: 0 };
+  for (const s of stories) for (const p of (s.pages || [])) {
+    c.pages++;
+    const v = (p.safety_verdict || "ALLOW").toUpperCase();
+    if (v === "SOFTENED") c.softened++;
+    else if (v === "BLOCKED_FALLBACK") c.blocked++;
+    // "nothing could be checked" is counted apart from "a draft failed" — the
+    // two used to land in the same bucket and the log explained only one.
+    else if (v === "ALLOW_UNVERIFIED" || v === "UNVERIFIED_FALLBACK"
+             || v === "UNVERIFIED") c.unverified++;
+    else if (v === "ALLOW_UNCHECKED") c.unchecked++;
+    else c.allow++;
+  }
+  const cell = (n, label) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`;
+  el("summary").innerHTML =
+    cell(c.stories, "stories") + cell(c.pages, "pages") + cell(c.allow, "allowed") +
+    cell(c.softened, "softened") + cell(c.blocked, "blocked") +
+    cell(c.unverified, "unverified") +
+    (c.unchecked ? cell(c.unchecked, "unchecked") : "");
+}
+
+function render() {
+  const stories = (DATA.stories || []).slice()
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  summarise(stories);
+  el("stories").innerHTML = stories.length
+    ? stories.map(renderStory).join("")
+    : `<div class="empty">No stories yet. The lantern has not been asked for one.</div>`;
+  applyFilter();
+
+  const bits = [];
+  if (DATA.generated_at) bits.push("read at " + fmtDate(DATA.generated_at));
+  if (DATA.child && DATA.child.name) bits.push(`${DATA.child.name}, age ${DATA.child.age}`);
+  if (DATA.storage && DATA.storage.media_mb != null) {
+    bits.push(`${DATA.storage.media_mb} MB of pictures and audio`);
+    if (DATA.storage.pruned_stories) bits.push(`${DATA.storage.pruned_stories} old stories pruned for space`);
+  }
+  if (DATA.residency_warning) bits.push("⚠ " + DATA.residency_warning);
+  el("meta").textContent = bits.join(" · ");
+  el("charter").textContent = DATA.charter_version
+    ? "Safety charter " + DATA.charter_version + " — it is a plain text file on this box. Read it, edit it, disagree with it."
+    : "";
+}
+
+function applyFilter() {
+  const only = el("onlyFlagged").checked;
+  for (const p of document.querySelectorAll(".page")) {
+    const v = p.getAttribute("data-verdict");
+    p.style.display = (only && v === "ALLOW") ? "none" : "";
+  }
+}
+
+// Field names differ slightly between the aggregate endpoint and the per-story one
+// (verdict vs safety_verdict, request vs raw_transcript). Normalise once, here, so the
+// renderer only ever sees one shape.
+function normStory(s, childName) {
+  const pages = (Array.isArray(s.pages) ? s.pages : []).map(p => ({
+    idx: p.idx,
+    text: p.text,
+    image_url: p.image_url || p.image_path || null,
+    audio_url: p.audio_url || p.audio_path || null,
+    image_blocked_reason: p.image_blocked_reason || null,
+    safety_verdict: (p.safety_verdict || p.verdict || "ALLOW"),
+    safety_reason: (p.safety_reason != null ? p.safety_reason : p.reason) || "",
+    regen_count: p.regen_count || 0,
+    gen_ms: p.gen_ms || 0,
+  }));
+  const theme = s.theme || {};
+  return {
+    id: s.id,
+    created_at: s.created_at,
+    title: s.title,
+    status: s.status,
+    child_name: s.child_name || childName || "",
+    raw_transcript: s.raw_transcript || s.request || "",
+    corrected_transcript: s.corrected_transcript || "",
+    redirect_note: s.redirect_note || theme.redirect_note || null,
+    pages,
+    page_count: s.page_count,
+    safety_events: s.safety_events || [],
+  };
+}
+
+async function getJSON(url, ms = 15000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { "Accept": "application/json" } });
+    if (!r.ok) { const e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+// Preferred: one aggregate endpoint. Fallback: lantern.py's own routes
+// (/api/status + /api/stories + /api/story/<id>), which is what ships today.
+async function fetchAll() {
+  try {
+    const j = await getJSON(API);
+    const d = Array.isArray(j) ? { stories: j } : (j || {});
+    d.stories = (d.stories || []).map(s => normStory(s, d.child && d.child.name));
+    d.generated_at = d.generated_at || new Date().toISOString();
+    return d;
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+  const status = await getJSON("/api/status").catch(() => ({}));
+  const list = await getJSON("/api/stories");
+  const rows = (Array.isArray(list) ? list : list.stories) || [];
+  const childName = status.child && status.child.name;
+  const full = [];
+  // Small local server; keep it to four in flight so a bedtime story in progress
+  // still gets the device worker's attention.
+  for (let i = 0; i < rows.length; i += 4) {
+    const batch = await Promise.all(rows.slice(i, i + 4).map(r =>
+      getJSON(`/api/story/${encodeURIComponent(r.id)}`).catch(() => r)));
+    for (const s of batch) full.push(normStory(s, childName));
+  }
+  return {
+    generated_at: new Date().toISOString(),
+    child: status.child || null,
+    charter_version: status.charter_version || null,
+    residency_warning: status.tts_ready === false ? "The narration model is not loaded." : null,
+    stories: full,
+  };
+}
+
+async function load() {
+  el("stories").innerHTML = `<div class="empty">loading…</div>`;
+  try {
+    DATA = await fetchAll();
+    if (!DATA.stories) DATA.stories = [];
+    render();
+  } catch (e) {
+    el("summary").innerHTML = "";
+    el("meta").textContent = "";
+    el("stories").innerHTML = `<div class="note">
+      <h3>Could not read the log</h3>
+      <p>${esc(e.message || e)}</p>
+      <p>It tried <code>GET ${API}</code> and then the lantern's own
+        <code>/api/status</code>, <code>/api/stories</code> and
+        <code>/api/story/&lt;id&gt;</code>.</p>
+      <p>The aggregate endpoint, if you add one, should return
+        <code>{generated_at, child:{name,age}, charter_version, storage:{media_mb,pruned_stories},
+        stories:[{id, created_at, title, status, raw_transcript, corrected_transcript,
+        redirect_note, pages:[{idx, text, image_url, audio_url, safety_verdict,
+        safety_reason, regen_count, gen_ms}], safety_events:[{at, stage, page_idx,
+        verdict, reason, offending_text}]}]}</code>
+        and deletion at <code>POST ${API.replace("/data", "")}/story/&lt;id&gt;/delete</code>.</p>
+      <p>Is <code>lantern.py</code> running?</p>
+    </div>`;
+  }
+}
+
+async function del(id) {
+  const s = (DATA.stories || []).find(x => String(x.id) === String(id));
+  const name = s && s.title ? `“${s.title}”` : "this story";
+  if (!confirm(`Delete ${name}?\n\nThe pages, the pictures, the narration and the safety `
+    + `events for this story are all removed from the lantern. Characters your child `
+    + `invented are kept — deleting a story never deletes Biscuit.\n\nThis cannot be undone.`)) return;
+  // Try the routes in the order they are most likely to exist. A parent pressing
+  // Delete must get either a deleted story or a straight answer — never a silent no-op.
+  const attempts = [
+    ["POST", `/api/story/${encodeURIComponent(id)}/delete`],
+    ["DELETE", `/api/story/${encodeURIComponent(id)}`],
+    ["POST", `/api/parent/story/${encodeURIComponent(id)}/delete`],
+  ];
+  let last = "";
+  for (const [method, url] of attempts) {
+    try {
+      const r = await fetch(url, { method });
+      if (r.ok) {
+        DATA.stories = (DATA.stories || []).filter(x => String(x.id) !== String(id));
+        render();
+        return;
+      }
+      last = `${method} ${url} → HTTP ${r.status}`;
+      // 404/405/501 all mean "this server does not have that route" — keep trying the
+      // others. Anything else is a real failure and should not be retried blindly.
+      if (![404, 405, 501].includes(r.status)) break;
+    } catch (e) {
+      last = `${method} ${url} → ${e.message || e}`;
+    }
+  }
+  alert("This lantern did not accept the delete.\n\n" + last +
+    "\n\nThe story is still on the box. Nothing was half-deleted.");
+}
+
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-del]");
+  if (b) del(b.getAttribute("data-del"));
+});
+el("onlyFlagged").addEventListener("change", applyFilter);
+el("refresh").addEventListener("click", load);
+load();
+</script>
