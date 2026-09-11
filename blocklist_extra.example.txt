@@ -1,4 +1,4 @@
-# Story Lantern — household blocklist (optional)
+# Story Lantern - household blocklist (optional)
 #
 # Copy this file to  blocklist_extra.txt  next to safety.py and it is loaded at import
 # time by the deterministic backstop. Every line here is a HARD decline on the child's
@@ -11,7 +11,7 @@
 #
 # This file is deliberately shipped empty of terms. The built-in `hate` rule only covers
 # the obvious constructions; a curated slur list belongs in a file a parent can read,
-# edit and diff — not compiled into the product. Add yours here.
+# edit and diff - not compiled into the product. Add yours here.
 #
 # Examples:
 # voldemort

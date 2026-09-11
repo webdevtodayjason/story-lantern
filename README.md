@@ -3,7 +3,7 @@
 A bedside lamp your kid talks to.
 
 They ask for a story. Twelve seconds later a painted page appears and a warm voice starts
-reading a brand-new story out loud — and their characters come back next time looking and
+reading a brand-new story out loud - and their characters come back next time looking and
 acting the same. The dog Biscuit still has the folded ear and the red collar.
 
 Everything happens on a **Tiiny Pocket** on your own network. The story is written,
@@ -18,7 +18,7 @@ API, and nothing about your child leaves the house.
 |---|---|
 | **Writes** the story | Ornith-1.0-35B, page by page, ~60 words a page |
 | **Paints** every page | Z-Image-Turbo, 512×512, 8 diffusion steps, ~8s |
-| **Reads** it aloud | Qwen3-TTS CustomVoice — a warm, unhurried voice |
+| **Reads** it aloud | Qwen3-TTS CustomVoice - a warm, unhurried voice |
 | **Remembers** characters | a character bible: a fixed descriptive phrase plus a fixed image seed, replayed verbatim into every later illustration |
 | **Checks** every page | a safety layer that classifies each page *before* it can be shown or spoken |
 | **Shows parents** everything | a transparency log: what was asked, what was written, and the verdict on every page |
@@ -31,7 +31,7 @@ The character memory is the product. A five-year-old notices when the dog looks 
 
 - A **Tiiny Pocket** reachable on your network
 - Any machine to host the lantern: a Raspberry Pi, a mini PC, an old laptop
-- Python 3.11+ — **standard library only**, no pip install, no virtualenv, no build step
+- Python 3.11+ - **standard library only**, no pip install, no virtualenv, no build step
 - A browser for the display (kiosk mode on a small screen makes it a lamp)
 
 NPU budget: Ornith 50u + Z-Image 32u + TTS 7u. TTS is loaded for a session and released
@@ -66,8 +66,8 @@ The autoplay flag is not optional. Without it the narration silently never plays
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TIINY_HOST` | — | device address (required) |
-| `TIINY_KEY` | — | device API key (required) |
+| `TIINY_HOST` | - | device address (required) |
+| `TIINY_KEY` | - | device API key (required) |
 | `PORT` | `8420` | web port |
 | `LANTERN_DB` | `./lantern.db` | SQLite state |
 | `LANTERN_BLOCKLIST` | `./blocklist_extra.txt` | extra words for the deterministic backstop |
@@ -85,7 +85,7 @@ Three things happen before a child hears a word:
 1. **A deterministic backstop** runs on the request before any model is involved. A
    catastrophic phrase never depends on a model being in a good mood.
 2. **A charter check** on what the child asked for. If it needs declining, the lantern
-   redirects warmly — it never shows a child an error or a refusal.
+   redirects warmly - it never shows a child an error or a refusal.
 3. **A classifier pass on every generated page**, against a rubric written for ages 3–8:
    no violence beyond fairy-tale peril, no death of a named companion, no body horror, no
    adult themes, nothing that frightens a child at bedtime, nothing instructing real-world
@@ -94,7 +94,7 @@ Three things happen before a child hears a word:
 
 **It fails closed.** If the device cannot be reached to classify a page, the page is *not*
 shown. `LANTERN_ALLOW_UNVERIFIED=1` takes the other side of that trade knowingly; the
-default does not. This was a deliberate reversal during review — the earlier behaviour
+default does not. This was a deliberate reversal during review - the earlier behaviour
 showed unverified pages and merely badged them, which is the wrong default when the
 audience is asleep in ten minutes.
 
@@ -114,9 +114,14 @@ adversarial self-test against a table of both innocent and genuinely nasty reque
 and retries `150004` with backoff, so Story Lantern co-exists with other applications
 using the same Tiiny rather than fighting them.
 
+If you are running several things against one Tiiny, [OneLane](https://github.com/webdevtodayjason/onelane)
+does this properly across separate programs rather than just within one. Retrying with
+backoff works, but it is still two apps guessing about each other. OneLane lets them
+actually take turns.
+
 **Prefetch is what makes it feel instant.** While page 1's narration plays (~30 seconds),
 the device is already writing and painting page 2 (~8 seconds). After the first page there
-is no waiting, ever — no spinner, no gap, just a cross-fade.
+is no waiting, ever - no spinner, no gap, just a cross-fade.
 
 **512×512 is not an aesthetic choice.** On current firmware it is the only image size
 Z-Image-Turbo will render; every other size fails after ~30 seconds.

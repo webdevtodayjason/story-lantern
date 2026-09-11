@@ -1,5 +1,5 @@
 <!--
-  Story Lantern — the parent log.
+  Story Lantern - the parent log.
 
   Self-contained: no framework, no CDN, no build step. Served by lantern.py at /parent.
 
@@ -11,10 +11,10 @@
 
   This page is deliberately plain. It is not a dashboard and it is not selling anything.
   It exists so a parent can read exactly what their child asked for, exactly what the
-  box wrote back, and exactly what the safety layer did about it — including the text it
+  box wrote back, and exactly what the safety layer did about it - including the text it
   refused to show. Nothing here is sanitised.
 -->
-<title>Story Lantern — Parent Log</title>
+<title>Story Lantern - Parent Log</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -131,7 +131,7 @@
 
 <div class="wrap">
   <header>
-    <h1>Story Lantern — parent log</h1>
+    <h1>Story Lantern - parent log</h1>
     <p class="sub">Every story the lantern told, in the child's own words, with the
       safety verdict on every page. Nothing on this page has been cleaned up.</p>
     <div class="meta" id="meta">loading…</div>
@@ -156,7 +156,7 @@
       the safety check. The lantern read a pre-written safe page instead and the story
       ended early. Your child heard a slightly short story; they did not see an error.</p>
     <p><span class="badge b-UNVERIFIED_FALLBACK">unverified_fallback</span> Different
-      thing, and it is not about what was written. No draft failed — the classifier could
+      thing, and it is not about what was written. No draft failed - the classifier could
       not be reached at all (the device was busy with something else, or a model was
       unloaded), so nothing was ever reviewed. The lantern read a pre-written safe page
       rather than an unchecked one, and the story ended early.</p>
@@ -175,7 +175,7 @@
 
   <footer>
     <p>A local classifier will have false negatives. This log is not a substitute for a
-      parent in the house — it exists so you can catch what the classifier didn't.
+      parent in the house - it exists so you can catch what the classifier didn't.
       Anyone who tells you a local model is unconditionally safe for a five-year-old is
       selling something.</p>
     <p id="charter"></p>
@@ -258,13 +258,13 @@ function renderEvents(events) {
   const rows = events.map(e => `<tr>
       <td>${esc((e.at || "").replace("T", " ").replace(/(\+00:00|Z)$/, ""))}</td>
       <td>${esc(e.stage)}</td>
-      <td>${esc(e.page_idx != null ? e.page_idx + 1 : "—")}</td>
+      <td>${esc(e.page_idx != null ? e.page_idx + 1 : "-")}</td>
       <td>${badge(e.verdict)}</td>
       <td>${esc(e.reason)}</td>
       <td class="verbatim">${esc(e.offending_text)}</td>
     </tr>`).join("");
   return `<details class="events">
-      <summary>${events.length} safety event${events.length === 1 ? "" : "s"} —
+      <summary>${events.length} safety event${events.length === 1 ? "" : "s"} -
         including the exact text that was held back</summary>
       <div class="evtable"><table>
         <tr><th>when</th><th>stage</th><th>page</th><th>verdict</th><th>reason</th>
@@ -306,7 +306,7 @@ function summarise(stories) {
     const v = (p.safety_verdict || "ALLOW").toUpperCase();
     if (v === "SOFTENED") c.softened++;
     else if (v === "BLOCKED_FALLBACK") c.blocked++;
-    // "nothing could be checked" is counted apart from "a draft failed" — the
+    // "nothing could be checked" is counted apart from "a draft failed" - the
     // two used to land in the same bucket and the log explained only one.
     else if (v === "ALLOW_UNVERIFIED" || v === "UNVERIFIED_FALLBACK"
              || v === "UNVERIFIED") c.unverified++;
@@ -340,7 +340,7 @@ function render() {
   if (DATA.residency_warning) bits.push("⚠ " + DATA.residency_warning);
   el("meta").textContent = bits.join(" · ");
   el("charter").textContent = DATA.charter_version
-    ? "Safety charter " + DATA.charter_version + " — it is a plain text file on this box. Read it, edit it, disagree with it."
+    ? "Safety charter " + DATA.charter_version + " - it is a plain text file on this box. Read it, edit it, disagree with it."
     : "";
 }
 
@@ -458,9 +458,9 @@ async function del(id) {
   const name = s && s.title ? `“${s.title}”` : "this story";
   if (!confirm(`Delete ${name}?\n\nThe pages, the pictures, the narration and the safety `
     + `events for this story are all removed from the lantern. Characters your child `
-    + `invented are kept — deleting a story never deletes Biscuit.\n\nThis cannot be undone.`)) return;
+    + `invented are kept - deleting a story never deletes Biscuit.\n\nThis cannot be undone.`)) return;
   // Try the routes in the order they are most likely to exist. A parent pressing
-  // Delete must get either a deleted story or a straight answer — never a silent no-op.
+  // Delete must get either a deleted story or a straight answer - never a silent no-op.
   const attempts = [
     ["POST", `/api/story/${encodeURIComponent(id)}/delete`],
     ["DELETE", `/api/story/${encodeURIComponent(id)}`],
@@ -476,7 +476,7 @@ async function del(id) {
         return;
       }
       last = `${method} ${url} → HTTP ${r.status}`;
-      // 404/405/501 all mean "this server does not have that route" — keep trying the
+      // 404/405/501 all mean "this server does not have that route" - keep trying the
       // others. Anything else is a real failure and should not be retried blindly.
       if (![404, 405, 501].includes(r.status)) break;
     } catch (e) {

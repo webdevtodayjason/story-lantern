@@ -7,7 +7,7 @@
 <title>Story Lantern</title>
 <!--
 ==========================================================================
-  STORY LANTERN — the lamp display.  One file. No framework, no CDN, no build.
+  STORY LANTERN - the lamp display.  One file. No framework, no CDN, no build.
   Served by lantern.py at  GET /show   (static/show.html)
 
   ------------------------------------------------------------------
@@ -23,14 +23,14 @@
   GET  /media/pageturn.wav  optional 4s ambience for the stall case. 404 is fine.
 
   EVENTS (named SSE events, JSON payloads).  Every one of them is optional and
-  arriving twice is safe — the page is idempotent by page index.
+  arriving twice is safe - the page is idempotent by page index.
 
     hello   {state, story:{story_id,title,page_count}|null, pages:[page,...],
              current_idx?:int}
               Sent immediately on connect so a browser refresh (or a kiosk
               restart mid-story) resumes exactly where it was. Include
-              current_idx — the page being READ, not the newest one prefetched
-              — or the display resumes on a page the story hasn't reached.
+              current_idx - the page being READ, not the newest one prefetched
+              - or the display resumes on a page the story hasn't reached.
     state   {state:"idle"|"listening"|"thinking"|"telling"|"ending", line?:"..."}
               `line` is optional human copy shown while thinking, e.g. the
               confirmed-back request. Never send error text here.
@@ -65,7 +65,7 @@
 <style>
 /* ---------------------------------------------------------------------
    PALETTE
-   A candle is not yellow — it is a warm orange core with a cool falloff.
+   A candle is not yellow - it is a warm orange core with a cool falloff.
    Everything here is built from a single amber family plus a bone-paper
    family, so the screen reads as ONE lit object in a dark room rather than
    as a UI with a theme. No pure black and no pure white anywhere.
@@ -89,7 +89,7 @@
   --ease: cubic-bezier(.4,0,.2,1);
 
   /* The plate is 512 native pixels when the panel can afford it and shrinks
-     from there. Never upscaled past 512 — see spec §8.4, the frame is the
+     from there. Never upscaled past 512 - see spec §8.4, the frame is the
      design, not the upsampler. */
   --plate: clamp(160px, min(512px, calc(100vw - 10vmin), calc(100vh - 244px)), 512px);
   --mat:   clamp(9px, 2.1vmin, 18px);
@@ -162,7 +162,7 @@ body[data-phase="over"] #glow{ opacity:.5; }
 }
 
 /* Running title: a hairline reminder of what we're inside of, from page two
-   on. Deliberately almost invisible — it is for the parent, not the child. */
+   on. Deliberately almost invisible - it is for the parent, not the child. */
 #running{
   position:fixed; top:clamp(10px,2.4vmin,22px); left:0; right:0; z-index:3;
   text-align:center; font-size:clamp(10px,1.5vmin,13px);
@@ -172,7 +172,7 @@ body[data-phase="over"] #glow{ opacity:.5; }
 #running.on{opacity:.26}
 
 /* ---------------------------------------------------------------------
-   THE FRAME — paper mat + soft-cornered window.
+   THE FRAME - paper mat + soft-cornered window.
    The mat is warm board, not white; it is what makes 512px read as a
    printed plate instead of a low-res JPEG. The outer shadow is doing two
    jobs: lifting the frame off the room, and spilling amber onto it so the
@@ -268,7 +268,7 @@ body[data-phase="ending"]  #frame{ opacity:1; transform:scale(1); }
 }
 
 /* ---------------------------------------------------------------------
-   THE CANDLE  — what the window holds when there is no page.
+   THE CANDLE  - what the window holds when there is no page.
    A teardrop of light with an unhurried flicker. This is the product's
    resting face; it has to be lovely on its own for hours.
    --------------------------------------------------------------------- */
@@ -287,7 +287,7 @@ body[data-phase="ending"]  #candle{ opacity:0 }
   background:radial-gradient(closest-side, rgba(255,186,102,.30), rgba(255,140,50,.11) 46%, transparent 74%);
   animation:flicker 3.7s ease-in-out infinite;
 }
-/* The flame is a square with three rounded corners turned 45° — the only
+/* The flame is a square with three rounded corners turned 45° - the only
    shape plain CSS makes that genuinely tapers to a point. The animation
    lives on the container so the rotation on ::after stays put and rides
    along with it. */
@@ -302,7 +302,7 @@ body[data-phase="ending"]  #candle{ opacity:0 }
   content:""; position:absolute; inset:0;
   border-radius:6% 50% 50% 50%;
   /* read right-to-left: turn the sharp corner to the top, then stretch the
-     whole teardrop along the vertical — a flame is taller than it is wide. */
+     whole teardrop along the vertical - a flame is taller than it is wide. */
   transform:scaleY(1.24) rotate(45deg);
   background:radial-gradient(circle at 64% 64%,
     #fffaf0 0%, var(--amber-hot) 13%, var(--amber) 31%, var(--amber-deep) 60%, rgba(163,58,8,.66) 90%);
@@ -332,7 +332,7 @@ body[data-phase="thinking"] #halo { animation-duration:1.9s }
 #prose{
   position:relative; z-index:2;
   /* Takes the space left under the plate, but never more than a third of the
-     panel — beyond that the prose drifts away from the picture it belongs to.
+     panel - beyond that the prose drifts away from the picture it belongs to.
      Unused slack stays with #stage, which keeps the whole column centred. */
   flex:1 1 auto; min-height:clamp(64px,12vmin,120px); max-height:min(34vh,320px);
   width:min(58ch, calc(100vw - 8vmin));
@@ -346,7 +346,7 @@ body[data-phase="thinking"] #halo { animation-duration:1.9s }
 .pr.on{opacity:1}
 /* Two acts share the prose box on page one: the title alone, then the page
    text. They cross-fade in place, which is why they stack rather than sit in
-   a column — and it is why the type on a short kiosk panel can stay large.
+   a column - and it is why the type on a short kiosk panel can stay large.
    A title and sixty words competing for 150px is what makes bedside screens
    look like dashboards. */
 .pr .wrap{
@@ -363,7 +363,7 @@ body[data-phase="thinking"] #halo { animation-duration:1.9s }
   text-shadow:0 1px 2px rgba(0,0,0,.55);
   text-wrap:pretty;
 }
-/* Page one only: the title is hand-set — larger, looser, with a small
+/* Page one only: the title is hand-set - larger, looser, with a small
    ornament beneath. It appears once and is never repeated. */
 .pr .in.title{
   font-size:1.9em; line-height:1.2; color:#ffe6bf;
@@ -393,13 +393,13 @@ body[data-phase="telling"] #dots.on{opacity:.24}
 #dots i.now{ opacity:1; background:var(--amber) }
 
 /* ---------------------------------------------------------------------
-   THE ASK — one line of invitation and a hairline field.
+   THE ASK - one line of invitation and a hairline field.
    It is the only interactive thing on screen and it leaves as soon as the
    story starts, so the object stops being a computer.
    --------------------------------------------------------------------- */
 /* The ask is taken OUT of the column flow deliberately: while a story is
    telling it is invisible, and if it still occupied a row it would steal a
-   hundred pixels from the prose on a short kiosk panel — which is exactly
+   hundred pixels from the prose on a short kiosk panel - which is exactly
    where the prose can least afford it. */
 #ask{
   position:absolute; left:0; right:0; bottom:clamp(12px,3vmin,40px); z-index:3;
@@ -442,7 +442,7 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
    the confirmation that it heard, and it doubles as the only "progress" cue. */
 #echo{
   /* Sits exactly where the input line was, so the request visibly takes the
-     field's place. Slow to arrive, quick to leave — a long fade-out would
+     field's place. Slow to arrive, quick to leave - a long fade-out would
      still be crossing the title of page one when it lands. */
   position:fixed; left:0; right:0; bottom:min(20vh,190px); z-index:3;
   text-align:center; font-style:italic; font-size:clamp(15px,2.4vmin,22px);
@@ -465,7 +465,7 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
 }
 
 /* ---------------------------------------------------------------------
-   REDUCED MOTION — no drift, no breathing, no flicker. Cross-fades stay
+   REDUCED MOTION - no drift, no breathing, no flicker. Cross-fades stay
    (a hard cut between pages is harsher than a fade) but they get short.
    --------------------------------------------------------------------- */
 @media (prefers-reduced-motion:reduce){
@@ -555,8 +555,8 @@ var S = {
 };
 
 /* Two timer pools, deliberately. The page clock (ptimers) is torn down every
-   time a new page starts reading; everything else — image-settle polls, the
-   notice auto-hide, the goodnight chain — lives on the session pool and must
+   time a new page starts reading; everything else - image-settle polls, the
+   notice auto-hide, the goodnight chain - lives on the session pool and must
    survive a page turn. Sharing one pool silently cancelled pending pages. */
 function clearPageTimers(){ S.ptimers.forEach(clearTimeout); S.ptimers = []; }
 function pageLater(fn, ms){ var t = setTimeout(fn, ms); S.ptimers.push(t); return t; }
@@ -592,7 +592,7 @@ function setPhase(p){
   var hide = (p === 'thinking' || p === 'listening' || p === 'telling' || p === 'ending');
   $('ask').classList.toggle('gone', hide);
   // The echo of the child's request belongs to the waiting, and to nothing
-  // else — once the first page is up it would sit on top of the prose.
+  // else - once the first page is up it would sit on top of the prose.
   if (p !== 'thinking' && p !== 'listening') $('echo').classList.remove('on');
 }
 
@@ -663,7 +663,7 @@ function stopAudio(pg){
 
 /* Everything a story leaves behind. Called when the child changes their mind
    mid-story: the server stops the old session first, which publishes an `end`
-   frame and drives finish() — so without this the NEW story's title and any of
+   frame and drives finish() - so without this the NEW story's title and any of
    its pages that had already arrived were discarded ~10s later by resetToIdle,
    and a page 0 landing inside that window was swallowed permanently. */
 function teardownStory(){
@@ -680,7 +680,7 @@ function teardownStory(){
    Images
    Preloaded and decoded BEFORE the cross-fade starts, so a page never
    fades in half-painted. A failure or a slow load just flips the page to
-   the prose-on-paper treatment — which is a design, not an error state.
+   the prose-on-paper treatment - which is a design, not an error state.
    ====================================================================== */
 function prepImage(pg){
   if (pg._imgState || !pg.image_url){ if (!pg.image_url) pg._imgState = 'none'; return; }
@@ -784,7 +784,7 @@ function drawDots(idx){
    Turning the page
    The cross-fade is started FADE ms before narration ends, so the new plate
    is fully present exactly as the last word lands. If the next page isn't
-   ready we hold the current one — never a gap, never a spinner.
+   ready we hold the current one - never a gap, never a spinner.
    ====================================================================== */
 function show(pg, immediate){
   var slot = 1 - front;
@@ -829,16 +829,16 @@ function startNarration(pg){
   S.audioDone = false;
 
   // Tell the server which page is being READ. This is the signal that releases
-  // the producer to build page idx+1 — without it the engine falls back to a
+  // the producer to build page idx+1 - without it the engine falls back to a
   // 45s stall timer per page and the story visibly limps. Fire-and-forget: a
   // failed report costs a slower prefetch, never a broken page.
   reportProgress(pg.idx);
 
   // Page one: the hand-set title holds for a beat as the voice begins, then
-  // settles into the page text. Same move as the demo — the title floats up,
+  // settles into the page text. Same move as the demo - the title floats up,
   // and only then does the reading start under it.
   // Its own timer, not the page pool: if narration fails we fall back to a
-  // read-time dwell, which tears the pool down — and the title would be left
+  // read-time dwell, which tears the pool down - and the title would be left
   // frozen on screen with the page text never arriving underneath it.
   var tt = proses[pg._slot] ? proses[pg._slot].querySelector('.wrap.tt:not(.hidden)') : null;
   clearTimeout(S.titleT);
@@ -954,7 +954,7 @@ function resetToIdle(){
    Incoming pages
    ====================================================================== */
 /* Fold one incoming page record into S.pages and return it. No side effects on
-   what is being shown — that is addPage's job. Split out so `hello` can resync
+   what is being shown - that is addPage's job. Split out so `hello` can resync
    the page set without also restarting the story. */
 function mergePage(raw){
   var idx  = Number(raw.idx != null ? raw.idx : (raw.index != null ? raw.index : raw.page)) || 0;
@@ -963,7 +963,7 @@ function mergePage(raw){
 
   // Re-delivery of a page we already hold is a MERGE, not a replace, so a
   // server that announces a page's text first and its media a moment later
-  // still works. (Sending the page complete is preferred — if the art loses
+  // still works. (Sending the page complete is preferred - if the art loses
   // the race to the display, that page shows as prose on paper.)
   var ex = S.pages.get(idx);
   if (ex){
@@ -1037,7 +1037,7 @@ function handle(kind, data){
       // fallback is running. It used to rebuild S.pages from scratch with brand
       // new page objects and then unconditionally show()+startNarration(),
       // which stacked a fresh <audio> and a fresh voice on top of the one still
-      // playing — a chorus, growing every 2.5 seconds. It is a RESYNC, not a
+      // playing - a chorus, growing every 2.5 seconds. It is a RESYNC, not a
       // restart: merge, and only take over the screen if we are not already on
       // the right page.
       if (data.story){
@@ -1050,7 +1050,7 @@ function handle(kind, data){
         list.forEach(mergePage);
         // Prefer the page the child was actually on. Without current_idx we
         // land on the newest page we hold, which can be a prefetched one the
-        // story hasn't reached yet — so the server should send it.
+        // story hasn't reached yet - so the server should send it.
         var top = Math.max.apply(null, Array.from(S.pages.keys()));
         var cur = (data.current_idx != null && S.pages.has(Number(data.current_idx)))
                 ? S.pages.get(Number(data.current_idx))
@@ -1078,7 +1078,7 @@ function handle(kind, data){
 
     if (kind === 'story'){
       // The child changed their mind. The server stops the old session first,
-      // which sends `end` and drives finish() — so tear the old story down HERE
+      // which sends `end` and drives finish() - so tear the old story down HERE
       // rather than letting resetToIdle do it ~10s from now, on top of the new
       // story's title and any pages that have already arrived.
       if (S.story && S.story.story_id !== data.story_id) teardownStory();
@@ -1258,7 +1258,7 @@ stirred();
 });
 
 /* ======================================================================
-   ?demo=1 — a fake story with canvas-painted plates, so the look can be
+   ?demo=1 - a fake story with canvas-painted plates, so the look can be
    reviewed with no device on the network. Never runs otherwise.
    ====================================================================== */
 var DEMO = /[?&]demo=1/.test(location.search);

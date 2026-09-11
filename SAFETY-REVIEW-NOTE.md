@@ -1,21 +1,29 @@
-# RESOLVED — classifier-unreachable now fails closed
+# Safety layer: design notes
 
-**Raised:** during the overnight build, against `safety.py`'s `ALLOW_UNVERIFIED` path.
-**Closed:** 2026-08-22 by the integration pass. Nothing outstanding.
+Story Lantern's safety layer fails closed. If a page cannot be checked, the child does not
+hear it. This note records how that default was arrived at and exactly what runs, so you can
+audit it rather than take my word for it.
 
-## What was wrong
+## Why fail closed
 
-If the independent classifier could not be reached inside its retry budget — a plausible
-event, because a WARBOARD instance shares this device and returns 150004 under contention
-— the page was shown and spoken anyway, recorded as `ALLOW_UNVERIFIED` and badged amber in
-the parent log.
+Three independent things run before a child hears a word: a deterministic backstop on the
+request, a charter check on what was asked for, and a classifier pass on every generated
+page. The interesting case is the third one being unavailable.
 
-The rationale was not silly: the deterministic blocklist and the request-level charter had
-both already passed, and refusing every page during a contention window would end a child's
-story for a reason unrelated to content. But the default was still wrong for this product.
-The audience is a five-year-old at bedtime, and "we logged it loudly" is no help in the
-moment, because the child has already heard it. The cost of failing closed is near zero,
-because the warm pre-written closing page already exists for the `BLOCK` case.
+The device does one inference at a time, so a classifier call can be squeezed out under
+contention, most plausibly by another app on the same Tiiny returning `150004`. An early
+build showed the page anyway in that window and badged it amber in the parent log. The
+reasoning was defensible: the other two checks had already passed, and refusing every page
+during a contention window ends a child's story for a reason unrelated to content.
+
+Review changed it, because the audience is a five-year-old at bedtime and "we logged it
+loudly" helps nobody once the child has already heard it. The cost of failing closed turned
+out to be near zero, because a warm pre-written closing page already existed for the block
+case. So an unverifiable page now splices that ending instead. The story is slightly
+shorter; it is never unverified.
+
+Fail-open is still reachable at `LANTERN_ALLOW_UNVERIFIED=1`, as a knowing opt-in rather
+than a default.
 
 ## What changed
 
@@ -32,8 +40,8 @@ because the warm pre-written closing page already exists for the `BLOCK` case.
   `LANTERN_ALLOW_UNVERIFIED=1`. On that path the page is badged `ALLOW_UNVERIFIED` in the
   parent log, which already had the amber styling for it.
 
-- A verdict the classifier returns that is NOT one of ALLOW/SOFTEN/BLOCK — a missing
-  `verdict` key, or a synonym like UNSAFE or REJECT — used to default to `ALLOW`, which
+- A verdict the classifier returns that is NOT one of ALLOW/SOFTEN/BLOCK - a missing
+  `verdict` key, or a synonym like UNSAFE or REJECT - used to default to `ALLOW`, which
   was the exact inverse of the policy on this page and of what `safety.py` had always
   done. It is now `SOFTEN`: one regeneration, then the fallback page.
 - The page text is now delimited when it is handed to the classifier, with a standing

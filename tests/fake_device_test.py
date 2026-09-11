@@ -3,7 +3,7 @@
     python3 tests/fake_device_test.py
 
 No Tiiny required and nothing touches the network. The fake stands in for
-DeviceWorker._http — the single socket — and asserts that no two device calls
+DeviceWorker._http - the single socket - and asserts that no two device calls
 ever overlap, which is the invariant the whole design rests on.
 
 Exercises: the plan call, the empty-content/reasoning-scavenge path, 150004

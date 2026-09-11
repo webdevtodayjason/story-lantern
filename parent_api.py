@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Story Lantern — parent_api.py
+Story Lantern - parent_api.py
 
 Two functions the parent page needs and the engine does not have yet:
 
@@ -148,7 +148,7 @@ def delete_story(conn: sqlite3.Connection, story_id: int, *,
     Two things this deliberately does NOT do:
 
     * It never touches the `character` table. Deleting last Tuesday's story must not
-      delete Biscuit — the character bible is the product, and a parent tidying up the
+      delete Biscuit - the character bible is the product, and a parent tidying up the
       log would be very surprised to find the dog gone. The confirmation dialog on the
       parent page promises this.
     * It never deletes a file that is not underneath `media_root`. Paths come out of the

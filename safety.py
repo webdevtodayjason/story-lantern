@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Story Lantern — safety.py
+Story Lantern - safety.py
 =========================
 
 The child-safety layer. An unmoderated 35B model is writing bedtime stories for a
@@ -14,10 +14,10 @@ Four layers, in the order they actually run:
      Runs BEFORE any model call, on the child's request AND on every generated page.
      This is the only layer that cannot hallucinate, so it owns the catastrophic cases.
 
-  2. THEME CONTRACT (story.py — not this file)
+  2. THEME CONTRACT (story.py - not this file)
      The story is never written from free text.
 
-  3. CHARTER (story.py system prompt — not this file)
+  3. CHARTER (story.py system prompt - not this file)
 
   4. INDEPENDENT MODEL CLASSIFIER (this file)
      A separate chat call, fresh context, sees only the page text and the child's age.
@@ -39,10 +39,10 @@ DEVICE NOTES (verified on hardware, do not "fix" these)
 * Base URL  http://$TIINY_HOST:8800   header  Authorization: Bearer $TIINY_KEY
 * Ornith-1.0-35B puts its reasoning in message.reasoning_content and that text COUNTS
   AGAINST max_tokens. With a small budget message.content comes back EMPTY. So the
-  classifier uses max_tokens=900 (NOT the 12 in the spec — 12 returns nothing at all)
+  classifier uses max_tokens=900 (NOT the 12 in the spec - 12 returns nothing at all)
   and, if content is empty, scavenges the last complete {...} block out of
   reasoning_content.
-* The device does ONE inference at a time and is shared with a production WARBOARD
+* The device does ONE inference at a time and is shared with a production Daybreak
   instance. Error 150004 means "busy", not "broken": retry with backoff, never crash.
 --------------------------------------------------------------------------------
 """
@@ -90,7 +90,7 @@ EXTRA_BLOCKLIST = Path(os.environ.get("LANTERN_BLOCKLIST", Path(__file__).with_n
 # If the classifier cannot be reached (device busy past the retry budget, model evicted,
 # host down) do we show the page?
 #
-# NO. We fail CLOSED, and so does the shipped engine — see SAFETY-REVIEW-NOTE.md and
+# NO. We fail CLOSED, and so does the shipped engine - see SAFETY-REVIEW-NOTE.md and
 # StorySession._judge in lantern.py, which is what actually runs. The old default here
 # was the opposite, which meant this file documented one policy while the product
 # shipped another; that is exactly how a fail-closed decision gets quietly undone.
@@ -113,7 +113,7 @@ UNVERIFIED = "UNVERIFIED"
 
 
 # --------------------------------------------------------------------------------------
-# Text normalisation — assume a clever eight-year-old is typing
+# Text normalisation - assume a clever eight-year-old is typing
 # --------------------------------------------------------------------------------------
 #
 # Two views of every string:
@@ -184,7 +184,7 @@ def views(text: str) -> tuple[str, str]:
 # --------------------------------------------------------------------------------------
 
 HARD = "HARD"        # never becomes a story / never reaches the child. Kind redirect.
-SWAP = "SWAP"        # playful substitution — the lantern is in on the joke.
+SWAP = "SWAP"        # playful substitution - the lantern is in on the joke.
 
 
 @dataclass(frozen=True)
@@ -213,7 +213,7 @@ _CATASTROPHIC: list[Rule] = [
     # First person is not the only way this arrives. A generated page says
     # "he hanged himself"; a child retelling says "she hurt herself". The
     # pronoun set and the tense set both have to be covered here, the way
-    # `real_violence` below already covers its targets — this rule is the most
+    # `real_violence` below already covers its targets - this rule is the most
     # catastrophic category in the product and it must not depend on the model
     # classifier being reachable and in a good mood.
     _r("self_harm", HARD,
@@ -255,7 +255,7 @@ _CATASTROPHIC: list[Rule] = [
        r"slit\w* (?:his|her|their|the) throat)\b",
        "real-world violence", notice=True),
 
-    # Killing a person is never a fairy-tale swap. Killing a dragon is (see SWAPS) —
+    # Killing a person is never a fairy-tale swap. Killing a dragon is (see SWAPS) -
     # that distinction is the whole reason this rule lists targets instead of verbs.
     _r("real_violence", HARD,
        r"\b(?:kill|murder|shoot|stab|hurt|strangle|drown)(?:s|ed|ing)?\s+"
@@ -355,11 +355,11 @@ SWAPS: dict[str, tuple[str, str, dict[str, str]]] = {
                   "instead of a coffin, a very comfortable box bed", {}),
     "skeleton":  ("a polite skeleton who has lost his hat",
                   "a polite skeleton who has lost his hat", {}),
-    # adjectives — swapped in place so the sentence survives
+    # adjectives - swapped in place so the sentence survives
     "scary":     ("spooky", "keeping it just a little bit spooky", {}),
     "haunted":   ("squeaky", "instead of haunted, a house that squeaks a lot", {}),
     "dead":      ("fast asleep", "instead of dead, fast asleep for a hundred years", {}),
-    # verbs — explicit forms, because English
+    # verbs - explicit forms, because English
     "fight":     ("thumb wrestle", "instead of a fight, a very serious thumb wrestle",
                   {"s": "thumb wrestles", "ing": "thumb wrestling", "ed": "thumb wrestled"}),
     "explode":   ("burst into confetti", "instead of exploding, bursting into confetti",
@@ -465,7 +465,7 @@ def _load_extra_rules() -> list[Rule]:
     Optional operator-supplied blocklist: one term or /regex/ per line, '#' comments.
 
     Deliberately NOT shipped populated. A curated slur list is exactly the sort of thing
-    that should live in a file a parent can read, edit and diff — not baked into code —
+    that should live in a file a parent can read, edit and diff - not baked into code -
     and the built-in `hate` rule above only covers the obvious constructions. Drop
     blocklist_extra.txt next to this file to extend the backstop.
     """
@@ -540,7 +540,7 @@ class PageOutcome:
 
 
 # --------------------------------------------------------------------------------------
-# Layer 1 — the deterministic backstop
+# Layer 1 - the deterministic backstop
 # --------------------------------------------------------------------------------------
 
 DECLINE_ALTERNATIVES = [
@@ -552,7 +552,7 @@ DECLINE_ALTERNATIVES = [
 ]
 
 _DECLINE_LINE = {
-    "sexual": "That one is a grown-up thing, not a bedtime thing. But I know a good story about {alt} — shall I tell you that one?",
+    "sexual": "That one is a grown-up thing, not a bedtime thing. But I know a good story about {alt} - shall I tell you that one?",
     "self_harm": "That one I would rather talk about with someone who can give you a hug. Let's find a grown-up in the morning. Tonight, how about {alt}?",
     "abuse_disclosure": "Thank you for telling me. That is a thing to tell a grown-up you trust, and I will keep it safe in the book for them. Tonight, would you like {alt}?",
     "real_violence": "I do not know how to tell that one, and I would not want to. How about {alt} instead?",
@@ -613,7 +613,7 @@ def backstop_request(text: str) -> RequestVerdict:
             lantern_says=says, safe_request=raw, story_steer=steer, parent_notice=True,
             matched=[r.category for r in sensitive], source="backstop", raw_request=raw)
 
-    # Playful substitutions — the story still gets told, just gentler, and out loud.
+    # Playful substitutions - the story still gets told, just gentler, and out loud.
     subs: list[tuple[str, str]] = []
     notes: list[str] = []
 
@@ -636,7 +636,7 @@ def backstop_request(text: str) -> RequestVerdict:
         return RequestVerdict(
             action=REDIRECT, category="softened_theme",
             reason="playful substitution for spooky or violent words",
-            lantern_says=f"Alright — {note}. Shall I begin?",
+            lantern_says=f"Alright - {note}. Shall I begin?",
             safe_request=safe, redirect_note=note, substitutions=subs,
             matched=[s[0] for s in subs],
             source="backstop", raw_request=raw)
@@ -704,7 +704,7 @@ def _post_json(path: str, payload: dict, timeout: int = CLASSIFY_TIMEOUT) -> dic
 def _post_json_retry(path: str, payload: dict, *, tries: int = BUSY_RETRIES,
                      gap: float = BUSY_BACKOFF, timeout: int = CLASSIFY_TIMEOUT) -> dict:
     """
-    150004 means the device is doing someone else's inference (WARBOARD, usually).
+    150004 means the device is doing someone else's inference (Daybreak, usually).
     It is expected, not exceptional. Never let it reach the child.
     """
     last: Optional[Exception] = None
@@ -763,7 +763,7 @@ def _chat_content(resp: dict) -> Optional[dict]:
 
 
 # --------------------------------------------------------------------------------------
-# Layer 4 — the independent classifier
+# Layer 4 - the independent classifier
 # --------------------------------------------------------------------------------------
 
 _CLASSIFIER_SYSTEM = """You are a strict child-safety reviewer for a bedtime story that \
@@ -777,7 +777,7 @@ credit for good intentions, and you do not assume anything is resolved on a late
 The page FAILS if it contains any of:
 1. Violence beyond fairy-tale peril. Peril must be resolved inside this same page. No \
 one is injured, no one is hit, nothing bleeds.
-2. Death, dying, killing, corpses, funerals, or a character who does not come back — \
+2. Death, dying, killing, corpses, funerals, or a character who does not come back - \
 especially a named animal or companion.
 3. Body horror: rot, decay, melting, missing or wrong body parts, teeth, eyes, insides, \
 things crawling under skin.
@@ -807,7 +807,7 @@ def classify_page_with_model(text: str, child_age: int = 5, *,
     """
     A fresh context that sees only the page text and the age. It is not shown the
     charter, the theme contract, the story so far, or the fact that a previous version
-    of this page failed — a classifier that knows what you want tells you what you want.
+    of this page failed - a classifier that knows what you want tells you what you want.
     """
     t0 = time.monotonic()
     payload = {
@@ -846,7 +846,7 @@ def classify_page_with_model(text: str, child_age: int = 5, *,
 
 def check_page(text: str, child_age: int = 5, *, use_model: bool = True) -> PageVerdict:
     """
-    Full post-generation check on one page. Backstop first — always — then the model.
+    Full post-generation check on one page. Backstop first - always - then the model.
     The backstop wins ties: a deterministic BLOCK is never argued out of by a model.
 
     Device-touching. The engine does not call this; see guard_page's docstring.
@@ -923,7 +923,7 @@ def _now() -> str:
 
 class SafetyLog:
     """
-    Persists every verdict. Nothing is hidden and nothing is sanitised — `offending_text`
+    Persists every verdict. Nothing is hidden and nothing is sanitised - `offending_text`
     is stored exactly as the model produced it or the child said it. Hiding what the
     model wrote from the parent would be worse than the model writing it.
 
@@ -1015,7 +1015,7 @@ class SafetyLog:
 
 
 # --------------------------------------------------------------------------------------
-# Fallback pages — pre-written, warm, and safe by construction
+# Fallback pages - pre-written, warm, and safe by construction
 # --------------------------------------------------------------------------------------
 #
 # These close a story gracefully. The child experiences a slightly short story. They
@@ -1108,15 +1108,15 @@ def guard_page(make_page: Callable[[int, Optional[str]], dict], *,
     engine: `check_page` -> `classify_page_with_model` -> `_post_json` opens its own
     socket to the device, which breaks the single-DeviceWorker invariant the whole
     design rests on (one inference at a time, on a box we share with a production
-    WARBOARD instance). The policy that actually runs is StorySession._judge plus
+    Daybreak instance). The policy that actually runs is StorySession._judge plus
     StorySession._build_page in lantern.py, and it goes through the job queue.
 
-    Keep this function honest anyway — it is what a maintainer reads to understand the
-    policy — but change lantern.py when you change behaviour.
+    Keep this function honest anyway - it is what a maintainer reads to understand the
+    policy - but change lantern.py when you change behaviour.
 
     `make_page(attempt, steer)` must return a dict with at least {"text": ...} and
     usually {"image_prompt": ...}. `steer` is None on the first attempt and a gentler
-    instruction string on the retry — append it to the page prompt.
+    instruction string on the retry - append it to the page prompt.
 
     Policy:
         attempt 0 fails  -> regenerate once with the reason as a constraint
@@ -1226,7 +1226,7 @@ def check_request(text: str, child_age: int = 5, *,
             v.category = "softened_theme"
             v.reason = mv.reason
             v.redirect_note = "keeping it gentle"
-            v.lantern_says = "Alright — I will keep that one gentle. Shall I begin?"
+            v.lantern_says = "Alright - I will keep that one gentle. Shall I begin?"
             v.source = "model"
 
     if log:
@@ -1325,13 +1325,13 @@ _PAGE_CASES: list[tuple[str, str, str]] = [
 
 def _selftest(live: bool = False) -> int:
     print("=" * 100)
-    print("STORY LANTERN SAFETY LAYER — self-test")
+    print("STORY LANTERN SAFETY LAYER - self-test")
     print(f"charter {CHARTER_VERSION}   backstop rules: "
           f"{len(_CATASTROPHIC)} catastrophic + {len(_PAGE_RULES)} page + "
           f"{len(SWAPS)} swaps + {len(_EXTRA_RULES)} operator")
     print("=" * 100)
 
-    print("\n### LAYER 1 — request check (deterministic, no device)\n")
+    print("\n### LAYER 1 - request check (deterministic, no device)\n")
     hdr = f"{'REQUEST':<58} {'GOT':<9} {'EXP':<9} {'':2} {'CATEGORY':<18} PARENT"
     print(hdr)
     print("-" * len(hdr))
@@ -1356,7 +1356,7 @@ def _selftest(live: bool = False) -> int:
             if v.action == REDIRECT:
                 print(f"    builds : {v.safe_request}")
 
-    print("\n### LAYER 1 — page backstop (deterministic, no device)\n")
+    print("\n### LAYER 1 - page backstop (deterministic, no device)\n")
     hdr2 = f"{'PAGE TEXT':<70} {'GOT':<7} {'EXP':<7} {''}"
     print(hdr2)
     print("-" * len(hdr2))
@@ -1372,7 +1372,7 @@ def _selftest(live: bool = False) -> int:
         if v.verdict != ALLOW:
             print(f"    -> {v.category}: {v.reason}   [{note}]")
 
-    print("\n### POLICY — regenerate then fall back (simulated generator, no device)\n")
+    print("\n### POLICY - regenerate then fall back (simulated generator, no device)\n")
     log = SafetyLog(db_path=Path(os.environ.get("LANTERN_SELFTEST_DB",
                                                 "/tmp/lantern-selftest.db")),
                     jsonl_path=Path("/tmp/lantern-selftest.jsonl"))
@@ -1401,14 +1401,14 @@ def _selftest(live: bool = False) -> int:
               f"fallback={out.is_fallback}")
         print(f"      text: {out.page['text'][:78]}")
 
-    print("\n### PARENT LOG — the rows a parent would see for story 999\n")
+    print("\n### PARENT LOG - the rows a parent would see for story 999\n")
     for row in reversed(log.events(story_id=999)):
         print(f"  {row['at']}  p{row['page_idx']}  {row['stage']:<12} "
               f"{row['verdict']:<18} {row['reason'][:60]}")
     log.close()
 
     if live:
-        print("\n### LAYER 4 — model classifier (LIVE against the device)\n")
+        print("\n### LAYER 4 - model classifier (LIVE against the device)\n")
         if not TIINY_KEY:
             print("  TIINY_KEY not set; skipping.")
         else:
