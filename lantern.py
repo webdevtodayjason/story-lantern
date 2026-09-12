@@ -1526,7 +1526,13 @@ class StorySession:
                             "returning": c["appearances"] > 1}
                            for c in self.cast.values()]},
             ui=("story", {"story_id": self.story_id, "title": self.title,
-                          "page_count": self.page_count}))
+                          "page_count": self.page_count,
+                          # The beats are what the workshop view draws while the
+                          # child waits. They are already written by this point;
+                          # withholding them just to keep the frame small is how
+                          # you end up with a candle that looks broken for 40s.
+                          "spine": list(self.spine),
+                          "setting": self.setting}))
 
     def _screen_plan_text(self, text: str, what: str, neutral: str) -> str:
         """Deterministic backstop over a plan field, with a neutral substitute.
@@ -1554,6 +1560,18 @@ class StorySession:
 
     # ---- one page ---------------------------------------------------------
 
+    def _stage(self, idx: int, stage: str) -> None:
+        """Say out loud what the lantern is doing right now.
+
+        First-page-playable measured 41.1s on the Tiiny Pocket, and for most of
+        that the lamp had nothing to show but a leaning candle - which reads as
+        broken, not as thinking. These are the real steps, published as they
+        happen; nothing here is a simulated progress bar."""
+        self.bus.publish("build", {"story_id": self.story_id, "idx": idx,
+                                   "stage": stage},
+                         ui=("build", {"story_id": self.story_id, "idx": idx,
+                                       "stage": stage}))
+
     def _build_page(self, idx: int) -> None:
         """Text -> safety -> narration -> illustration.
 
@@ -1567,6 +1585,7 @@ class StorySession:
         lane = LANE_LIVE if idx == 0 else LANE_PREFETCH
         page = PageState(idx=idx)
         t_page = time.time()
+        self._stage(idx, "writing")
 
         # 1. prose
         if idx == 0 and getattr(self, "_pending_first", None):
@@ -1581,6 +1600,7 @@ class StorySession:
             page.text, page.scene, page.characters = draft
 
         # 2. safety: local blocklist, then the suspicious adult in a fresh call
+        self._stage(idx, "checking")
         page.verdict, page.reason = self._judge(idx, page.text, lane)
         if page.verdict == "SOFTEN":
             regen = self._write_page(idx, lane, constraint=page.reason)
@@ -1629,6 +1649,11 @@ class StorySession:
 
         # 3. narration. THEN the page reaches the lamp: voice and text together,
         #    which is what the child experiences as the story starting.
+        # Before the wait, not after it. The TTS model takes ~14s to load and
+        # the stage label is what the child is reading during it - leaving this
+        # below the join left the lamp saying "making sure it is kind" for
+        # fourteen seconds of something else entirely.
+        self._stage(idx, "voicing")
         if idx == 0:
             # ensure_tts runs on its own daemon thread and nothing used to wait
             # for it, so page 0's narration call landed roughly while the ~15s
@@ -1644,6 +1669,7 @@ class StorySession:
                          ui=("page", self._ui_page(page)))
 
         # 4. illustration, which fades in over the amber mid-sentence.
+        self._stage(idx, "painting")
         self._illustrate(page, lane)
 
         page.gen_ms = int((time.time() - t_page) * 1000)
@@ -2393,6 +2419,66 @@ class Lantern:
 
 
 # --------------------------------------------------------------------------
+# Replaying a story off the shelf
+# --------------------------------------------------------------------------
+class ReplaySession:
+    """A finished story, told again from the database. No device, no NPU.
+
+    It presents the same read surface StorySession does - status, pages,
+    reading_idx, _ui_page - so snapshot(), the SSE hello and /api/progress all
+    work unchanged. The lamp cannot tell the difference, which is the point: a
+    child asking for the dragon story again should not wait ninety seconds for
+    a story that already exists.
+    """
+    def __init__(self, story_id: int, title: str, rows: list):
+        self.story_id = story_id
+        self.title = title or ""
+        self.page_count = len(rows)
+        self.status = "telling"
+        self.reading_idx = -1
+        self.replay = True
+        self._cv = threading.Condition()
+        self.stop_event = threading.Event()
+        # The rest of StorySession's surface, because the app reaches for it on
+        # whatever session is current - and a replay is the current session.
+        # A never-started thread reports is_alive() False, which is the honest
+        # answer to the only question anyone asks it: is a producer still
+        # working? Leaving this off meant every new story request after a
+        # replay died with AttributeError and the child sat on a candle.
+        self.thread = threading.Thread(target=lambda: None, name="replay-idle")
+        self.cast: dict = {}
+        self.setting = ""
+        self.timings: list = []
+        self.media_dir = os.path.join(CFG.media_dir, str(story_id))
+        self.pages = {}
+        for r in rows:
+            self.pages[r["idx"]] = PageState(
+                idx=r["idx"], page_id=r["id"], text=r["text"] or "",
+                image_path=r["image_path"], audio_path=r["audio_path"],
+                verdict=r["safety_verdict"] or "ALLOW")
+
+    def _ui_page(self, page) -> dict:
+        return {"story_id": self.story_id, "idx": page.idx, "text": page.text,
+                "image_url": f"/page/{page.page_id}.png" if page.image_path else None,
+                "audio_url": f"/page/{page.page_id}.mp3" if page.audio_path else None,
+                "last": page.idx == self.page_count - 1}
+
+    def mark_reading(self, idx: int) -> None:
+        with self._cv:
+            if idx > self.reading_idx:
+                self.reading_idx = idx
+            if idx >= self.page_count - 1:
+                self.status = "finished"
+
+    def start(self) -> None:
+        pass
+
+    def stop(self, reason: str = "stopped") -> None:
+        self.status = "stopped"
+        self.stop_event.set()
+
+
+# --------------------------------------------------------------------------
 # Read models for the API
 # --------------------------------------------------------------------------
 
@@ -2432,10 +2518,15 @@ def stories_json(limit: int = 40) -> list[dict]:
     rows = db().execute(
         "SELECT s.*, (SELECT COUNT(*) FROM page WHERE story_id=s.id) AS pages,"
         " (SELECT COUNT(*) FROM safety_event WHERE story_id=s.id AND verdict!='ALLOW')"
-        " AS flags FROM story s ORDER BY s.id DESC LIMIT ?", (limit,)).fetchall()
+        " AS flags,"
+        " (SELECT id FROM page WHERE story_id=s.id AND image_path IS NOT NULL"
+        "  ORDER BY idx LIMIT 1) AS cover_id"
+        " FROM story s ORDER BY s.id DESC LIMIT ?", (limit,)).fetchall()
     return [{"id": r["id"], "title": r["title"], "request": r["raw_transcript"],
              "status": r["status"], "created_at": r["created_at"],
-             "pages": r["pages"], "flags": r["flags"]} for r in rows]
+             "pages": r["pages"], "flags": r["flags"],
+             "cover": f"/page/{r['cover_id']}.png" if r["cover_id"] else None}
+            for r in rows]
 
 
 def characters_json(cid: int) -> list[dict]:
@@ -2713,9 +2804,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             s.mark_reading(idx)
             return self._json({"ok": True, "reading_idx": s.reading_idx})
 
+        m = re.fullmatch(r"/api/story/(\d+)/replay", path)
+        if m:
+            sid = int(m.group(1))
+            conn = db()
+            row = conn.execute("SELECT * FROM story WHERE id=?", (sid,)).fetchone()
+            rows = conn.execute(
+                "SELECT * FROM page WHERE story_id=? ORDER BY idx", (sid,)).fetchall()
+            if not row or not rows:
+                return self._err(404, "no such story")
+            if L.session:
+                L.session.stop("stopped")
+            sess = ReplaySession(sid, row["title"], rows)
+            L.session = sess
+            L.bus.publish("story.replay",
+                          {"story_id": sid, "title": sess.title},
+                          ui=("story", {"story_id": sid, "title": sess.title,
+                                        "page_count": sess.page_count}))
+            for idx in sorted(sess.pages):
+                L.bus.publish("page.replay", {"idx": idx},
+                              ui=("page", sess._ui_page(sess.pages[idx])))
+            return self._json({"ok": True, "story_id": sid,
+                               "pages": sess.page_count})
+
         if path == "/api/stop":
             if L.session:
                 L.session.stop("stopped")
+            # Back to the candle. Without this the lamp holds the last frame and
+            # a refresh resumes a story the child has already walked away from.
+            L.bus.publish("story.stopped", {},
+                          ui=("end", {"reason": "stopped"}))
             return self._json({"ok": True})
 
         # The parent page offers both spellings; accept either, plus DELETE.

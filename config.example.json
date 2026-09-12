@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy to config.json, beside lantern.py or in ~/.lantern. Every key is optional; env wins over this file. Delete the keys you do not want to change.",
+
+  "child_name": "Maya",
+  "child_age": 5,
+  "page_count": 8,
+  "max_scary": 1,
+
+  "manage_tts": true,
+  "safety_classifier": true,
+
+  "busy_max_wait": 90.0,
+  "prefetch_stall_s": 45.0,
+
+  "media_cap_gb": 5.0,
+  "device_call_keep_days": 30,
+  "safety_event_keep": 5000
+}

@@ -271,6 +271,38 @@ check("/api/request returns ok:true", body202.get("ok") is True, body202)
 lan.session.stop()
 time.sleep(0.3)
 
+print("\n== replay a saved story (the shelf) ==")
+shelf = get("/api/stories")["stories"]
+mine = [x for x in shelf if x["id"] == sid][0]
+check("shelf lists the story", mine["pages"] > 0, mine["pages"])
+check("shelf entry carries a cover", bool(mine["cover"]), mine["cover"])
+
+rp = post(f"/api/story/{sid}/replay", {})
+check("replay accepted", rp.get("ok") is True, rp)
+check("replay reports every page", rp.get("pages") == mine["pages"], rp)
+st = get("/api/state")
+check("replay puts the lamp back in telling", st["state"] == "telling", st["state"])
+check("replay re-serves the pages", len(st["pages"]) == mine["pages"], len(st["pages"]))
+check("replay page 0 keeps its art and voice",
+      bool(st["pages"][0]["image_url"]) and bool(st["pages"][0]["audio_url"]),
+      st["pages"][0])
+check("last page is marked last", st["pages"][-1].get("last") is True, st["pages"][-1])
+# A replay must never call the device: the story already exists.
+calls_before = L.db().execute("SELECT COUNT(*) c FROM device_call").fetchone()["c"]
+post(f"/api/story/{sid}/replay", {})
+check("replay makes no device calls",
+      L.db().execute("SELECT COUNT(*) c FROM device_call").fetchone()["c"] == calls_before)
+post("/api/stop", {})
+check("stop returns to the candle", get("/api/state")["state"] == "idle")
+
+# The bug this catches: ReplaySession was missing StorySession's `thread`, so
+# every new story request after a replay died with AttributeError and the lamp
+# sat on a candle forever.
+post(f"/api/story/{sid}/replay", {})
+again = post("/api/request", {"request": "a story about a kite"})
+check("a new story can start right after a replay", again.get("ok") is True, again)
+post("/api/stop", {})
+
 print("\n== parent page contract (static/parent.html) ==")
 pd = get("/api/parent/data")
 for k in ("child", "stories"):

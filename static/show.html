@@ -71,6 +71,12 @@
    as a UI with a theme. No pure black and no pure white anywhere.
    --------------------------------------------------------------------- */
 :root{
+  /* What the button bar occupies, in one place: the page column, the page
+     dots and the bar itself all measure off these. */
+  --barbtn:      clamp(58px,11vmin,86px);
+  --barpad:      max(14px, env(safe-area-inset-bottom));
+  --barh:        calc(var(--barbtn) + var(--barpad));
+
   --room:        #0a0705;
   --amber:       #ffb968;
   --amber-hot:   #ffd9a3;
@@ -85,17 +91,19 @@
   --serif: "Iowan Old Style","Palatino Linotype","Book Antiqua",Palatino,
            Georgia,"Hoefler Text","Times New Roman",serif;
 
-  --fade: 900ms;            /* page cross-fade. Mirrored in JS as FADE. */
+  --fade: 900ms;            /* still used by the ask and the notice */
   --ease: cubic-bezier(.4,0,.2,1);
 
-  /* The plate is 512 native pixels when the panel can afford it and shrinks
-     from there. Never upscaled past 512 - see spec §8.4, the frame is the
-     design, not the upsampler. */
-  --plate: clamp(160px, min(512px, calc(100vw - 10vmin), calc(100vh - 244px)), 512px);
+  /* The book is two portrait pages side by side. Its height is what the panel
+     can spare once the buttons and the running title have taken theirs; the
+     width follows from that, because a book has a fixed shape. */
+  --bh:    clamp(190px, min(600px, calc(100vh - var(--barh) - 84px), calc((100vw - 7vmin) / 1.38)), 600px);
+  --bw:    calc(var(--bh) * 1.38);
+  --turn:  1150ms;
   --mat:   clamp(9px, 2.1vmin, 18px);
 }
 @supports (height: 100svh){
-  :root{ --plate: clamp(160px, min(512px, calc(100vw - 10vmin), calc(100svh - 244px)), 512px); }
+  :root{ --bh: clamp(190px, min(600px, calc(100svh - var(--barh) - 84px), calc((100vw - 7vmin) / 1.38)), 600px); }
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -160,6 +168,14 @@ body[data-phase="over"] #glow{ opacity:.5; }
   padding:clamp(10px,2.6vmin,40px);
   padding-bottom:clamp(30px,6vmin,66px);   /* keeps the page dots clear of the prose */
 }
+/* While a story is on screen the column has to end ABOVE the buttons and
+   below the running title, or the last lines of the page are read through a
+   wooden button. --barh is what the bar actually occupies. */
+body[data-phase="telling"] #stage,
+body[data-phase="ending"]  #stage{
+  padding-bottom:calc(var(--barh) + clamp(14px,2.4vmin,26px));
+  padding-top:clamp(30px,5vmin,52px);
+}
 
 /* Running title: a hairline reminder of what we're inside of, from page two
    on. Deliberately almost invisible - it is for the parent, not the child. */
@@ -172,93 +188,167 @@ body[data-phase="over"] #glow{ opacity:.5; }
 #running.on{opacity:.26}
 
 /* ---------------------------------------------------------------------
-   THE FRAME - paper mat + soft-cornered window.
-   The mat is warm board, not white; it is what makes 512px read as a
-   printed plate instead of a low-res JPEG. The outer shadow is doing two
-   jobs: lifting the frame off the room, and spilling amber onto it so the
-   picture looks lit from the same candle as everything else.
+   THE BOOK - two pages and a sheet between them.
+   The sheet's FRONT is the page being read and its BACK is the picture of
+   the page you are turning to, which is how a real leaf works: that, and
+   not a cross-fade, is what makes the turn read as a book. Everything else
+   here is bindery - the fold, the gutter margins, the light running off
+   the paper as it lifts.
    --------------------------------------------------------------------- */
-#frame{
-  position:relative;
-  width:calc(var(--plate) + var(--mat)*2);
-  height:calc(var(--plate) + var(--mat)*2);
-  padding:var(--mat);
-  border-radius:calc(var(--mat) + 16px);
-  background:
-    /* board fibre: two fine gradient weaves, no image assets */
-    repeating-linear-gradient(92deg, rgba(120,86,44,.055) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(3deg,  rgba(255,255,255,.05) 0 1px, transparent 1px 4px),
-    radial-gradient(140% 120% at 30% 0%, #fbf0da 0%, var(--paper) 45%, var(--paper-deep) 100%);
-  box-shadow:
-    0 0 0 1px rgba(255,214,160,.16),
-    0 1px 0 rgba(255,255,255,.35) inset,
-    0 34px 70px -28px rgba(0,0,0,.92),
-    0 0 90px 6px rgba(255,146,52,.14);
+#book{
+  position:relative; z-index:2;
+  width:var(--bw); height:var(--bh);
+  perspective:2900px; perspective-origin:50% 46%;
+  filter:drop-shadow(0 30px 52px rgba(0,0,0,.8));
   opacity:0; transform:scale(.985);
   transition:opacity 1.1s var(--ease), transform 1.1s var(--ease);
 }
-body[data-phase="telling"] #frame,
-body[data-phase="ending"]  #frame{ opacity:1; transform:scale(1); }
+body[data-phase="telling"] #book,
+body[data-phase="ending"]  #book{ opacity:1; transform:scale(1); }
 
-#window{
-  position:relative; width:100%; height:100%;
-  border-radius:calc(var(--mat) + 2px);
-  overflow:hidden;
-  background:#1a1108;
-  box-shadow:0 0 0 1px rgba(80,52,22,.35) inset, 0 2px 10px rgba(0,0,0,.35) inset;
+/* The boards, proud of the paper on every side. */
+#book::before{
+  content:""; position:absolute; inset:-1.9% -1.5%; border-radius:7px;
+  background:linear-gradient(158deg,#5d2f19,#3d1c0d 46%,#2a1309);
+  box-shadow:inset 0 0 0 1px rgba(255,196,130,.16),
+             inset 0 2px 3px rgba(255,200,140,.14),
+             0 0 80px 6px rgba(255,146,52,.12);
+}
+/* The binding itself: the dark line the two blocks of paper meet at. */
+#book::after{
+  content:""; position:absolute; top:1.5%; bottom:1.5%; left:50%; width:1px; z-index:6;
+  transform:translateX(-.5px); pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(30,16,6,.85) 12%,rgba(30,16,6,.85) 88%,transparent);
 }
 
-/* Two identical layers we ping-pong between. Cross-fading whole layers (not
-   swapping an src) is what removes the flash between pages. */
-.layer{
-  position:absolute; inset:0; opacity:0;
-  transition:opacity var(--fade) var(--ease);
+.side{ position:absolute; top:0; height:100%; width:50%; overflow:hidden }
+.side.l{ left:0;  border-radius:4px 0 0 4px }
+.side.r{ right:0; border-radius:0 4px 4px 0 }
+
+/* One stock for every page face. */
+.face{
+  position:absolute; inset:0; overflow:hidden; backface-visibility:hidden;
+  background:
+    repeating-linear-gradient(96deg, rgba(120,86,44,.045) 0 1px, transparent 1px 3px),
+    radial-gradient(130% 110% at 40% 8%, #fdf4e2 0%, var(--paper) 52%, #e8d6b4 100%);
 }
-.layer.on{opacity:1}
-.layer img{
-  position:absolute; inset:0; width:100%; height:100%;
-  object-fit:cover; display:block;
-  /* Ken-burns: the plate breathes so it reads as a lit object, not a still.
-     Direction alternates per page (see .layer.alt) so it never feels mechanical. */
-  animation:drift 34s ease-out both;
-  transform-origin:52% 48%;
+/* The gutter. Two pages with no fold between them read as one flat sheet,
+   which is the single thing that stops a spread looking like a book. Paper
+   darkens fast in the last few percent and carries a thin highlight where
+   it turns back up out of the binding. */
+.face.l::after,.face.r::after{
+  content:""; position:absolute; top:0; bottom:0; width:22%; pointer-events:none; z-index:3;
 }
-.layer.alt img{ animation-name:driftB; transform-origin:44% 56%; }
+.face.l::after{ right:0; background:
+  linear-gradient(90deg,transparent 0%,rgba(74,46,18,.06) 52%,rgba(74,46,18,.26) 84%,rgba(52,31,11,.62) 100%),
+  linear-gradient(90deg,transparent 94%,rgba(255,240,214,.34) 97%,transparent 98%) }
+.face.r::after{ left:0; background:
+  linear-gradient(270deg,transparent 0%,rgba(74,46,18,.06) 52%,rgba(74,46,18,.26) 84%,rgba(52,31,11,.62) 100%),
+  linear-gradient(270deg,transparent 94%,rgba(255,240,214,.34) 97%,transparent 98%) }
+
+/* Asymmetric margins, the way a bound book is set: the gutter side gets the
+   wider one because the fold eats it. */
+.art{
+  position:absolute; inset:6% 12% 6% 6.5%; border-radius:2px; overflow:hidden;
+  box-shadow:0 1px 0 rgba(255,255,255,.5), 0 6px 16px -6px rgba(74,46,18,.5);
+}
+.art img{
+  width:100%; height:100%; object-fit:cover; display:block;
+  animation:drift 34s ease-out both; transform-origin:52% 48%;
+}
+.face.alt .art img{ animation-name:driftB; transform-origin:44% 56% }
 @keyframes drift { from{transform:scale(1.005)} to{transform:scale(1.045) translate(-1%,-.8%)} }
 @keyframes driftB{ from{transform:scale(1.005)} to{transform:scale(1.045) translate(1%,.7%)} }
 
-/* Prose-on-paper fallback: this is what a failed illustration looks like.
-   It is a deliberate typographic page, so a child sees a book, not a gap. */
-.layer .plate{
-  position:absolute; inset:0; display:none; overflow:hidden;
-  padding:clamp(18px,5%,42px);
-  flex-direction:column; align-items:center; justify-content:center; text-align:center;
-  color:var(--ink);
-  background:
-    repeating-linear-gradient(96deg, rgba(120,86,44,.05) 0 1px, transparent 1px 3px),
-    radial-gradient(130% 110% at 40% 10%, #fdf4e2 0%, #f3e7ce 52%, #e6d3af 100%);
+/* No illustration for this page. Not an error state: a printed book with a
+   plate that simply was not made, keyline and ornament and all. */
+.blank{
+  position:absolute; inset:6% 12% 6% 6.5%; display:none;
+  align-items:center; justify-content:center;
+  box-shadow:inset 0 0 0 1px rgba(120,86,44,.3);
 }
-.layer.noart .plate{display:flex}
-/* One inline font-size on the wrapper scales the whole block; the fit()
-   routine in JS shrinks it until the page cannot possibly be clipped. */
-.layer .plate .pwrap{ font-size:clamp(15px,3.05vmin,22px); line-height:1.62; max-width:30ch }
-.layer .plate p{ font-size:1em }
-.layer .plate .t{
-  display:block; font-size:1.42em; line-height:1.2; margin-bottom:.7em;
-  letter-spacing:.005em; color:#4a3721;
+.face.noart .art{ display:none }
+.face.noart .blank{ display:flex }
+.blank::before{
+  content:""; width:42%; height:4px;
+  background-image:
+    radial-gradient(circle, var(--amber-deep) 0 2px, transparent 2.4px),
+    linear-gradient(90deg, transparent, rgba(150,96,40,.5) 22%, rgba(150,96,40,.5) 78%, transparent);
+  background-size:100% 100%, 100% 1px;
+  background-position:center, center; background-repeat:no-repeat; opacity:.75;
 }
 
-/* Vignette + grain sit ABOVE the art, always, including over the fallback
-   plate. Same light on everything is what sells it as one object. */
+/* The text page. fit() moves the font-size on .in until the block cannot
+   be clipped, exactly as it did under the old plate. */
+.txt{
+  position:absolute; inset:9% 8% 12% 14%;
+  display:flex; align-items:center; justify-content:center; text-align:center; color:var(--ink);
+}
+.r .txt{ inset:9% 8% 12% 14% }
+.txt .in{ font-size:clamp(12px,2.3vmin,20px) }
+.txt p{ font-size:1em; line-height:1.62; text-wrap:pretty }
+/* Page one only: the title is hand-set above the first words, once. */
+.txt .t{
+  display:block; font-size:1.52em; line-height:1.22; margin-bottom:.55em;
+  color:#4a3721; letter-spacing:.004em;
+}
+.txt .t::after{
+  content:""; display:block; width:4.6em; height:4px; margin:.42em auto .1em;
+  background-image:
+    radial-gradient(circle, var(--amber-deep) 0 1.7px, transparent 2px),
+    linear-gradient(90deg, transparent, rgba(150,96,40,.55) 22%, rgba(150,96,40,.55) 78%, transparent);
+  background-size:100% 100%, 100% 1px;
+  background-position:center, center; background-repeat:no-repeat; opacity:.8;
+}
+.num{ position:absolute; bottom:4.2%; font-size:clamp(9px,1.35vmin,12px); color:#8a7150; opacity:.7 }
+.l .num{ left:9% } .r .num{ right:9% }
+
+/* THE SHEET. */
+#leaf{
+  position:absolute; top:0; left:50%; width:50%; height:100%;
+  transform-origin:left center; transform-style:preserve-3d;
+  z-index:5; border-radius:0 4px 4px 0;
+}
+#leaf .face.back{ transform:rotateY(180deg) }
+/* The outer edge, lit while the sheet stands up. */
+#leaf .face::before{
+  content:""; position:absolute; top:0; bottom:0; right:0; width:3px; z-index:4;
+  pointer-events:none; background:linear-gradient(90deg,transparent,rgba(255,228,182,.55)); opacity:0;
+}
+.sheen{
+  position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0;
+  backface-visibility:hidden; mix-blend-mode:multiply;
+  background:linear-gradient(93deg, rgba(38,22,8,.62), rgba(140,96,44,.12) 44%, rgba(40,24,9,.5));
+}
+#leaf.go{ animation:flip var(--turn) cubic-bezier(.36,.06,.28,1) forwards }
+#leaf.go .face.front .sheen{ animation:dim  var(--turn) cubic-bezier(.36,.06,.28,1) forwards }
+#leaf.go .face.back  .sheen{ animation:lit  var(--turn) cubic-bezier(.36,.06,.28,1) forwards }
+#leaf.go .face::before{       animation:edge var(--turn) cubic-bezier(.36,.06,.28,1) forwards }
+@keyframes flip{ from{transform:rotateY(0)} to{transform:rotateY(-180deg)} }
+@keyframes dim { from{opacity:0} to{opacity:.92} }
+@keyframes lit { from{opacity:.95} 74%{opacity:.28} to{opacity:0} }
+@keyframes edge{ 0%{opacity:0} 30%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+
+/* The shadow the lifting sheet throws across the page it uncovers. */
+#cast{
+  position:absolute; top:0; left:0; width:50%; height:100%; z-index:4; opacity:0;
+  pointer-events:none; border-radius:4px 0 0 4px;
+  background:linear-gradient(270deg, rgba(28,14,4,.66), rgba(28,14,4,.16) 46%, transparent 76%);
+}
+#leaf.go ~ #cast{ animation:cast var(--turn) cubic-bezier(.36,.06,.28,1) forwards }
+@keyframes cast{ from{opacity:0} 42%{opacity:1} to{opacity:0} }
+
+/* Vignette + grain sit ABOVE everything in the book, the turning sheet
+   included. Same light on all of it is what sells it as one object. */
 #veil{
-  position:absolute; inset:0; pointer-events:none;
+  position:absolute; inset:0; pointer-events:none; z-index:6;
   background:
     radial-gradient(115% 115% at 50% 44%, transparent 45%, rgba(30,14,4,.30) 78%, rgba(16,8,3,.62) 100%),
     linear-gradient(to bottom, rgba(255,196,124,.10), transparent 30%, rgba(60,28,8,.16));
   mix-blend-mode:multiply;
 }
 #grain{
-  position:absolute; inset:0; pointer-events:none; opacity:.5;
+  position:absolute; inset:0; pointer-events:none; opacity:.5; z-index:7;
   background:
     repeating-conic-gradient(from 12deg at 50% 50%, rgba(255,255,255,.035) 0 1deg, transparent 1deg 3deg),
     repeating-linear-gradient(41deg, rgba(0,0,0,.05) 0 1px, transparent 1px 2px),
@@ -324,62 +414,12 @@ body[data-phase="ending"]  #candle{ opacity:0 }
 body[data-phase="thinking"] #flame{ animation-duration:1.5s }
 body[data-phase="thinking"] #halo { animation-duration:1.9s }
 
-/* ---------------------------------------------------------------------
-   PROSE under the plate.
-   Sized for a parent reading from the doorway, measure held near 42ch so
-   the eye can find the next line at that distance.
-   --------------------------------------------------------------------- */
+/* The prose used to have its own column under the plate. It is set on the
+   right-hand page now, so all that is left here is the live region a screen
+   reader reads each page from - visually nothing. */
 #prose{
-  position:relative; z-index:2;
-  /* Takes the space left under the plate, but never more than a third of the
-     panel - beyond that the prose drifts away from the picture it belongs to.
-     Unused slack stays with #stage, which keeps the whole column centred. */
-  flex:1 1 auto; min-height:clamp(64px,12vmin,120px); max-height:min(34vh,320px);
-  width:min(58ch, calc(100vw - 8vmin));
-  text-align:center;
-}
-.pr{
-  position:absolute; inset:0; opacity:0; overflow:hidden;
-  transition:opacity var(--fade) var(--ease);
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-}
-.pr.on{opacity:1}
-/* Two acts share the prose box on page one: the title alone, then the page
-   text. They cross-fade in place, which is why they stack rather than sit in
-   a column - and it is why the type on a short kiosk panel can stay large.
-   A title and sixty words competing for 150px is what makes bedside screens
-   look like dashboards. */
-.pr .wrap{
-  position:absolute; inset:0; display:flex;
-  align-items:center; justify-content:center;
-  opacity:1; transition:opacity 700ms var(--ease);
-}
-.pr .wrap.off{opacity:0}
-.pr .wrap.hidden{display:none}
-/* One inline font-size on .in scales the block; fit() moves that number. */
-.pr .in{ font-size:clamp(16px,3.05vmin,27px) }
-.pr p{
-  font-size:1em; line-height:1.6; color:var(--cream);
-  text-shadow:0 1px 2px rgba(0,0,0,.55);
-  text-wrap:pretty;
-}
-/* Page one only: the title is hand-set - larger, looser, with a small
-   ornament beneath. It appears once and is never repeated. */
-.pr .in.title{
-  font-size:1.9em; line-height:1.2; color:#ffe6bf;
-  letter-spacing:.006em; text-shadow:0 2px 12px rgba(0,0,0,.65);
-}
-/* A hairline rule with a bead in the middle, drawn in gradients. A glyph
-   ornament turns to mud at 12px on a small panel; this stays crisp. */
-.pr .in.title::after{
-  content:""; display:block; width:5.2em; height:4px; margin:.62em auto 0;
-  background-image:
-    radial-gradient(circle, var(--amber) 0 1.7px, transparent 2px),
-    linear-gradient(90deg, transparent, rgba(255,185,104,.6) 22%, rgba(255,185,104,.6) 78%, transparent);
-  background-size:100% 100%, 100% 1px;
-  background-position:center, center;
-  background-repeat:no-repeat;
-  opacity:.9;
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap;
 }
 
 /* Page dots: a book's ribbon, not a progress bar. Barely there. */
@@ -389,6 +429,9 @@ body[data-phase="thinking"] #halo { animation-duration:1.9s }
   opacity:0; transition:opacity 1.2s var(--ease); pointer-events:none;
 }
 body[data-phase="telling"] #dots.on{opacity:.24}
+/* The ribbon sat exactly where the buttons now are. */
+body[data-phase="telling"] #dots,
+body[data-phase="ending"]  #dots{ bottom:calc(var(--barh) + clamp(8px,1.4vmin,15px)) }
 #dots i{ width:5px; height:5px; border-radius:50%; background:var(--cream); opacity:.35 }
 #dots i.now{ opacity:1; background:var(--amber) }
 
@@ -452,16 +495,26 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
 #echo.on{opacity:.62; transition:opacity 1.4s var(--ease)}
 
 /* ---------------------------------------------------------------------
-   SHORT LANDSCAPE (a laptop window, an odd panel): plate beside the prose
-   instead of above it, so the picture never gets crushed.
+   SHORT LANDSCAPE (a laptop window, an odd panel). The spread is already
+   side by side; it just needs the height back, so the running title and the
+   page dots stand down and the book takes what they were using.
    --------------------------------------------------------------------- */
 @media (max-height:560px) and (min-aspect-ratio:13/10){
-  :root{ --plate: clamp(150px, min(512px, calc(100vh - 76px)), 512px); }
-  #stage{ flex-direction:row; gap:clamp(18px,4vw,54px) }
-  #prose{ width:min(38ch,42vw); text-align:left }
-  .pr{ justify-content:center; align-items:flex-start }
-  .pr .title::after{ margin-left:0 }
+  :root{ --bh: clamp(150px, min(600px, calc(100vh - var(--barh) - 24px), calc((100vw - 5vmin) / 1.38)), 600px); }
+  body[data-phase="telling"] #stage,
+  body[data-phase="ending"]  #stage{ padding-top:8px }
+  #running{ display:none }
   #ask{ position:fixed; bottom:clamp(10px,3vh,24px); left:0; right:0 }
+}
+
+/* ---------------------------------------------------------------------
+   PORTRAIT. A landscape book on a tall screen gets small, so the type has
+   to stop shrinking with it - the words matter more than the shape does.
+   --------------------------------------------------------------------- */
+@media (max-aspect-ratio:1/1){
+  .txt{ inset:7% 6% 10% 11% }
+  .txt .in{ font-size:clamp(11px,3.1vmin,18px) }
+  .art,.blank{ inset:5% 9% 5% 5% }
 }
 
 /* ---------------------------------------------------------------------
@@ -469,11 +522,122 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
    (a hard cut between pages is harsher than a fade) but they get short.
    --------------------------------------------------------------------- */
 @media (prefers-reduced-motion:reduce){
-  :root{ --fade:260ms }
+  :root{ --fade:260ms; --turn:260ms }
+  /* No page turn: back to the cross-fade it replaced. */
+  .layer.turn-out,.layer.turn-in,.layer.turn-out .sheen{ animation:none !important }
+  .layer.turn-out{ opacity:0 }
+  .layer.turning .back,.layer.turning .sheen{ display:none }
   #glow,.layer img,#flame,#halo{ animation:none !important }
   #frame{ transition-duration:.3s }
   .layer img{ transform:none }
 }
+
+/* ======================================================================
+   Controls and the shelf
+   Three big round buttons a five-year-old can hit without aiming, plus the
+   shelf of stories already told. They fade out while a page is being read so
+   they never compete with the illustration, and come back on a tap.
+   ====================================================================== */
+#bar{position:fixed;left:0;right:0;bottom:var(--barpad);
+  display:flex;gap:clamp(14px,3.2vmin,26px);justify-content:center;z-index:60;
+  opacity:0;pointer-events:none;transition:opacity 420ms var(--ease)}
+#bar.show{opacity:1;pointer-events:auto}
+.kb{-webkit-appearance:none;appearance:none;border:0;cursor:pointer;position:relative;
+  width:var(--barbtn);height:var(--barbtn);border-radius:50%;
+  display:grid;place-items:center;font-family:var(--serif);color:var(--ink);
+  background:radial-gradient(circle at 34% 28%, #fff8e8, var(--paper) 62%, var(--paper-deep));
+  box-shadow:0 3px 0 rgba(120,84,40,.45), 0 8px 22px rgba(0,0,0,.4),
+             inset 0 2px 5px rgba(255,255,255,.75);
+  transition:transform 130ms var(--ease), box-shadow 130ms var(--ease)}
+.kb:active{transform:translateY(3px);
+  box-shadow:0 1px 0 rgba(120,84,40,.45), 0 4px 12px rgba(0,0,0,.35),
+             inset 0 2px 5px rgba(255,255,255,.6)}
+.kb svg{width:44%;height:44%;fill:var(--ink);opacity:.86}
+.kb .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.kb[hidden]{display:none}
+
+#shelf{position:fixed;inset:0;z-index:70;background:rgba(24,14,6,.93);
+  display:none;flex-direction:column;padding:clamp(18px,4vmin,40px)}
+#shelf.show{display:flex}
+#shelf h2{font-family:var(--serif);color:var(--cream);font-weight:400;
+  font-size:clamp(19px,3.6vmin,30px);text-align:center;margin:0 0 clamp(14px,3vmin,26px);
+  letter-spacing:.02em;opacity:.92}
+#shelfList{flex:1;overflow-y:auto;display:grid;gap:clamp(11px,2.2vmin,18px);
+  grid-template-columns:repeat(auto-fill,minmax(clamp(136px,22vmin,210px),1fr));
+  align-content:start;padding-bottom:clamp(70px,13vmin,110px)}
+.bk{cursor:pointer;border:0;padding:0;text-align:left;border-radius:12px;
+  overflow:hidden;background:var(--paper);font-family:var(--serif);
+  box-shadow:0 5px 16px rgba(0,0,0,.45);transition:transform 140ms var(--ease)}
+.bk:active{transform:scale(.965)}
+.bk .cv{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:var(--paper-deep)}
+.bk .ttl{padding:9px 11px 11px;color:var(--ink);font-size:clamp(13px,2.1vmin,16px);line-height:1.28}
+.bk .sub{display:block;margin-top:3px;opacity:.55;font-size:.84em}
+#shelfEmpty{color:var(--cream);opacity:.6;text-align:center;font-family:var(--serif);
+  padding:clamp(26px,7vmin,60px) 0;font-size:clamp(14px,2.4vmin,18px)}
+
+/* ======================================================================
+   The workshop
+   Forty seconds pass between the ask and the first page, and a candle that
+   just sits there reads as broken. So the lantern shows its work: the beats
+   of the story appear as soon as they are written, and the plate being made
+   right now says what is happening to it. Every step here is a real event
+   off the engine - nothing is a timer pretending to be progress.
+   ====================================================================== */
+/* Below the flame, never through it. The candle sits a little above centre,
+   so anything vertically centred here is read straight across the brightest
+   part of the picture. */
+#workshop{position:fixed;left:0;right:0;top:53%;bottom:auto;
+  z-index:40;display:none;padding:0 clamp(16px,5vw,64px);text-align:center;
+  max-height:46vh;overflow:hidden;pointer-events:none}
+/* Once the storyboard is up it is the thing to look at; the lamp steps back. */
+body.planned #candle{opacity:.32}
+/* The title says what is coming now; the echoed request would only sit
+   on top of the beats. */
+body.planned #echo{opacity:0}
+body[data-phase="thinking"] #workshop{display:block}
+#wsTitle{font-family:var(--serif);color:var(--cream);opacity:0;
+  font-size:clamp(20px,3.4vmin,30px);line-height:1.25;margin-bottom:.5em;
+  transition:opacity 1.4s var(--ease)}
+#wsTitle.on{opacity:.94}
+#wsLine{font-family:var(--serif);color:var(--cream);opacity:.52;
+  font-size:clamp(13px,1.9vmin,16px);letter-spacing:.045em;margin-bottom:clamp(16px,3vmin,30px)}
+#wsLine i{font-style:normal;opacity:.8}
+
+#wsDots{display:flex;gap:10px;justify-content:center;margin-bottom:clamp(16px,3vmin,30px)}
+#wsDots b{width:7px;height:7px;border-radius:50%;background:var(--amber);
+  opacity:.25;animation:wsPulse 1.7s var(--ease) infinite}
+#wsDots b:nth-child(2){animation-delay:.28s}
+#wsDots b:nth-child(3){animation-delay:.56s}
+@keyframes wsPulse{0%,100%{opacity:.18;transform:scale(.82)}45%{opacity:.85;transform:scale(1.12)}}
+
+#wsBoard{display:flex;flex-wrap:wrap;gap:clamp(8px,1.5vmin,16px);justify-content:center;
+  max-width:min(1120px,94vw);margin:0 auto}
+.pl{width:clamp(74px,9.5vmin,116px);opacity:0;transform:translateY(9px);
+  animation:wsIn .7s var(--ease) forwards}
+.pl .plate{width:100%;aspect-ratio:1/1;border-radius:7px;position:relative;overflow:hidden;
+  background:linear-gradient(160deg,rgba(243,230,205,.14),rgba(243,230,205,.05));
+  box-shadow:inset 0 0 0 1px rgba(243,230,205,.16)}
+.pl .plate::after{content:"";position:absolute;inset:0;opacity:0;
+  background:radial-gradient(circle at 50% 45%, rgba(255,185,104,.5), transparent 68%);
+  transition:opacity .8s var(--ease)}
+.pl .beat{font-family:var(--serif);color:var(--cream);opacity:.4;
+  font-size:clamp(9px,1.24vmin,11.5px);line-height:1.34;margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.pl.now .plate{box-shadow:inset 0 0 0 1px rgba(255,185,104,.62),
+  0 0 24px rgba(255,185,104,.28)}
+.pl.now .plate::after{opacity:1;animation:wsBreathe 2.4s var(--ease) infinite}
+.pl.now .beat{opacity:.85}
+.pl.done .plate{background:linear-gradient(160deg,rgba(255,185,104,.3),rgba(243,230,205,.1));
+  box-shadow:inset 0 0 0 1px rgba(243,230,205,.3)}
+.pl.done .beat{opacity:.58}
+@keyframes wsIn{to{opacity:1;transform:none}}
+@keyframes wsBreathe{0%,100%{opacity:.55}50%{opacity:1}}
+
+/* The way out of the shelf. Toggling the same button closed it, but nothing
+   said so - which is a trap, not a control. */
+#shelfBack{position:absolute;top:clamp(14px,3vmin,30px);right:clamp(14px,3vmin,30px);
+  width:clamp(44px,7vmin,58px);height:clamp(44px,7vmin,58px)}
+#shelfBack svg{width:42%;height:42%}
 </style>
 </head>
 <body data-phase="idle">
@@ -486,20 +650,37 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
 <div id="candle"><div id="halo"></div><div id="flame"></div></div>
 
 <main id="stage">
-  <div id="frame">
-    <div id="window">
-      <div class="layer" id="L0"><img alt=""><div class="plate"><div class="pwrap"><p></p></div></div></div>
-      <div class="layer" id="L1"><img alt=""><div class="plate"><div class="pwrap"><p></p></div></div></div>
-      <div id="veil"></div>
-      <div id="grain"></div>
+  <div id="book">
+    <!-- left page: the picture of the page being read -->
+    <div class="side l"><div class="face l" id="pL">
+      <div class="art"><img alt=""></div><div class="blank"></div><span class="num"></span>
+    </div></div>
+
+    <!-- right page: the words of the page being turned TO, uncovered as the
+         sheet lifts off it -->
+    <div class="side r"><div class="face r" id="pR">
+      <div class="txt"><div class="in"><p></p></div></div><span class="num"></span>
+    </div></div>
+
+    <!-- the sheet: its front is what you are reading, its back is the
+         picture you are turning to -->
+    <div id="leaf">
+      <div class="face r front" id="lf">
+        <div class="txt"><div class="in"><p></p></div></div><span class="num"></span>
+        <div class="sheen"></div>
+      </div>
+      <div class="face l back" id="lb">
+        <div class="art"><img alt=""></div><div class="blank"></div><span class="num"></span>
+        <div class="sheen"></div>
+      </div>
     </div>
+    <div id="cast"></div>
+    <div id="veil"></div>
+    <div id="grain"></div>
   </div>
 
   <!-- aria-live so a screen reader gets each page once, as it appears -->
-  <div id="prose" aria-live="polite" aria-atomic="true">
-    <div class="pr" id="P0"></div>
-    <div class="pr" id="P1"></div>
-  </div>
+  <div id="prose" aria-live="polite" aria-atomic="true"></div>
 
   <form id="ask" autocomplete="off">
     <div id="invite">Tell me a story about…</div>
@@ -507,6 +688,42 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
            placeholder="a dragon who's scared of the dark" aria-label="What should the story be about?">
   </form>
 </main>
+
+<div id="workshop">
+  <div id="wsTitle"></div>
+  <div id="wsLine">the lantern is dreaming up your story</div>
+  <div id="wsDots"><b></b><b></b><b></b></div>
+  <div id="wsBoard"></div>
+</div>
+
+<div id="bar">
+  <button class="kb" id="bPause" type="button" title="Pause">
+    <span class="lbl">Pause</span>
+    <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4.4" height="16" rx="1.6"/><rect x="13.6" y="4" width="4.4" height="16" rx="1.6"/></svg>
+  </button>
+  <button class="kb" id="bPlay" type="button" title="Play" hidden>
+    <span class="lbl">Play</span>
+    <svg viewBox="0 0 24 24"><path d="M8 5.2v13.6c0 .9 1 1.5 1.8 1L20 12.9c.7-.4.7-1.4 0-1.8L9.8 4.2C9 3.7 8 4.3 8 5.2z"/></svg>
+  </button>
+  <button class="kb" id="bNew" type="button" title="A new story">
+    <span class="lbl">A new story</span>
+    <svg viewBox="0 0 24 24"><path d="M12 2.6l2.1 5.1 5.5.4-4.2 3.6 1.3 5.3L12 14.2 7.3 17l1.3-5.3L4.4 8.1l5.5-.4z"/></svg>
+  </button>
+  <button class="kb" id="bShelf" type="button" title="Stories we have told">
+    <span class="lbl">Stories we have told</span>
+    <svg viewBox="0 0 24 24"><path d="M4 4.5h6.2c.9 0 1.6.7 1.6 1.6V20c0-.9-.7-1.6-1.6-1.6H4zM20 4.5h-6.2c-.9 0-1.6.7-1.6 1.6V20c0-.9.7-1.6 1.6-1.6H20z"/></svg>
+  </button>
+</div>
+
+<div id="shelf">
+  <button class="kb" id="shelfBack" type="button" title="Back">
+    <span class="lbl">Back</span>
+    <svg viewBox="0 0 24 24"><path d="M18.4 7.1a1.2 1.2 0 0 0-1.7-1.7L12 10.3 7.3 5.4A1.2 1.2 0 0 0 5.6 7.1l4.7 4.9-4.7 4.9a1.2 1.2 0 0 0 1.7 1.7l4.7-4.9 4.7 4.9a1.2 1.2 0 0 0 1.7-1.7L13.7 12z"/></svg>
+  </button>
+  <h2>Stories we have told</h2>
+  <div id="shelfList"></div>
+  <div id="shelfEmpty" hidden>No stories yet. Ask for one.</div>
+</div>
 
 <div id="echo"></div>
 <div id="notice"></div>
@@ -520,7 +737,7 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
    Constants and tiny helpers
    ====================================================================== */
 var REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)').matches;
-var FADE    = REDUCED ? 260 : 900;      // must match --fade
+var FADE    = REDUCED ? 260 : 1150;     // the page turn; must match --turn
 var STALL_GIVEUP = 90000;               // UI safety net if the server never
                                         // sends the next page (spec caps the
                                         // server side at 45s; this is slower
@@ -533,11 +750,17 @@ var WPS = 2.2;                          // words/sec ≈ 132wpm, for read-time
 
 var $ = function(id){ return document.getElementById(id); };
 var body = document.body;
-var layers  = [$('L0'), $('L1')];
-var proses  = [$('P0'), $('P1')];
-var front   = 0;                        // which layer pair is visible
+/* The book. At rest the left page carries the picture of the page being read
+   and the sheet's front carries its words; the right page and the sheet's
+   back are only dressed during a turn, with the page being turned TO. */
+var leaf    = $('leaf');
+var faceL   = $('pL');                  // left page  - picture, current
+var faceR   = $('pR');                  // right page - words, next
+var leafF   = $('lf');                  // sheet front - words, current
+var leafB   = $('lb');                  // sheet back  - picture, next
 
 var S = {
+  paused: false,
   phase:   'idle',
   story:   null,
   pages:   new Map(),                   // idx -> page record
@@ -550,7 +773,6 @@ var S = {
   pending: null,                        // page waiting for both to finish
   timers:  [],                          // session-lifetime timers
   ptimers: [],                          // this-page-only timers
-  titleT:  null,                        // page-one title reveal
   thinkT:  null                         // "no story ever arrived" clock
 };
 
@@ -558,8 +780,33 @@ var S = {
    time a new page starts reading; everything else - image-settle polls, the
    notice auto-hide, the goodnight chain - lives on the session pool and must
    survive a page turn. Sharing one pool silently cancelled pending pages. */
+/* A story can end mid-turn - the child changes their mind, or the engine
+   stops. Strip the leaf classes or the next story inherits a page frozen at
+   168 degrees. */
+function clearTurn(){
+  leaf.style.transition = 'none';
+  leaf.classList.remove('go');
+  void leaf.offsetWidth;
+  leaf.style.transition = '';
+}
 function clearPageTimers(){ S.ptimers.forEach(clearTimeout); S.ptimers = []; }
-function pageLater(fn, ms){ var t = setTimeout(fn, ms); S.ptimers.push(t); return t; }
+/* Page timers tick rather than sleep: a pause landing mid-dwell has to stop the
+   clock that turns the page, not just the voice. 250ms granularity is far finer
+   than anything it measures (the shortest dwell is 1.2s).
+   ponytail: no elapsed-time bookkeeping anywhere else - this is the one place
+   that knows a page can be held. */
+function pageLater(fn, ms){
+  var left = ms, last = Date.now(), id;
+  function tick(){
+    var now = Date.now();
+    if (!S.paused) left -= (now - last);
+    last = now;
+    if (left <= 20) return fn();
+    id = setTimeout(tick, Math.min(250, left)); S.ptimers.push(id);
+  }
+  id = setTimeout(tick, Math.min(250, ms)); S.ptimers.push(id);
+  return id;
+}
 function clearTimers(){ clearPageTimers(); S.timers.forEach(clearTimeout); S.timers = []; }
 function later(fn, ms){ var t = setTimeout(fn, ms); S.timers.push(t); return t; }
 function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
@@ -569,6 +816,7 @@ function readTime(t){ return Math.max(6000, (words(t)/WPS)*1000 + 1800); }
 function setPhase(p){
   S.phase = p;
   body.setAttribute('data-phase', p);
+  updateBar();
 
   /* There is a 90s net for a mid-story stall but nothing ever watched the
      thinking phase. The engine's plan call can legitimately run two chat
@@ -667,11 +915,13 @@ function stopAudio(pg){
    its pages that had already arrived were discarded ~10s later by resetToIdle,
    and a page 0 landing inside that window was swallowed permanently. */
 function teardownStory(){
-  clearTimers(); clearTimeout(S.titleT); clearTimeout(S.thinkT); ambienceOff();
+  clearTimers(); clearTimeout(S.thinkT); ambienceOff();
   S.pages.forEach(stopAudio);
   S.pages = new Map();
   S.current = null; S.pending = null;
+  S.paused = false; body.classList.remove('paused');
   S.turning = false; S.holding = false; S.ended = false;
+  clearTurn();
   S.fadeDone = true; S.audioDone = true;
   body.classList.remove('waiting');
 }
@@ -682,58 +932,76 @@ function teardownStory(){
    fades in half-painted. A failure or a slow load just flips the page to
    the prose-on-paper treatment - which is a design, not an error state.
    ====================================================================== */
-function prepImage(pg){
+function prepImage(pg, then){
   if (pg._imgState || !pg.image_url){ if (!pg.image_url) pg._imgState = 'none'; return; }
   pg._imgState = 'loading';
   var im = new Image();
   var done = false;
   var give = setTimeout(function(){ if(!done){ done = true; pg._imgState = 'none'; } }, 12000);
-  im.onload  = function(){ if(done) return; done = true; clearTimeout(give); pg._imgState = 'ok'; pg._img = im; };
+  im.onload  = function(){ if(done) return; done = true; clearTimeout(give); pg._imgState = 'ok'; pg._img = im;
+                           if (then) then(pg); };
   im.onerror = function(){ if(done) return; done = true; clearTimeout(give); pg._imgState = 'none'; };
   im.src = pg.image_url;
 }
+/* The engine ships a page the moment it has a voice and paints it ~8 seconds
+   later, on purpose - the voice is what starts the page. The late `page` frame
+   carrying image_url was merged and the image was even preloaded, but nothing
+   ever put it on screen, so a page displayed before its art simply kept the
+   prose-on-paper treatment for its whole turn. On a live story that is most
+   pages, which is why the lamp looked like it never made pictures. Cross-fade
+   the same page into the other layer: identical prose, so all that visibly
+   changes is that the picture arrives. */
+function artArrived(pg){
+  if (S.ended || pg._imgState !== 'ok') return;
+  // Mid-turn, the page this art belongs to is the one on the back of the
+  // sheet; at rest it is the left page. Either way it is the same picture
+  // arriving late onto a page already in front of the child.
+  if (S.turning && S.pending === pg){ dressArt(leafB, pg); return; }
+  if (S.current === pg && !S.turning)  dressArt(faceL, pg);
+}
+
 function imageSettled(pg){ return pg._imgState === 'ok' || pg._imgState === 'none' || !pg.image_url; }
 
 /* ======================================================================
-   Painting a page into the back layer
+   Dressing a page
+   Two faces, never a whole "slot": a picture face and a words face. The turn
+   moves which faces are showing; these only fill them.
    ====================================================================== */
-function paint(pg, slot){
-  var L = layers[slot], P = proses[slot];
-  var img = L.querySelector('img');
-  var plate = L.querySelector('.plate');
-  var pwrap = L.querySelector('.pwrap');
-  var plateP = pwrap.querySelector('p');
+function dressArt(face, pg){
+  var img = face.querySelector('.art img');
+  face.classList.toggle('alt', (pg.idx % 2) === 1);   // alternate the drift
+  if (pg._imgState === 'ok' && pg.image_url){
+    face.classList.remove('noart');
+    img.src = pg.image_url;
+    img.style.animation = 'none'; void img.offsetWidth; img.style.animation = '';
+  } else {
+    // No plate for this page. Not an error: a printed book with a picture
+    // that was never made, keyline and ornament and all.
+    face.classList.add('noart');
+    img.removeAttribute('src');
+  }
+  face.querySelector('.num').textContent = pg.idx * 2 + 1;
+}
+
+function dressText(face, pg){
+  var box = face.querySelector('.txt');
+  var inn = box.querySelector('.in');
   var isFirst = (pg.idx === 0);
   var title = (S.story && S.story.title) ? S.story.title : '';
+  inn.innerHTML = (isFirst && title ? '<span class="t">' + esc(title) + '</span>' : '') +
+                  '<p>' + esc(pg.text) + '</p>';
+  fit(box, inn);
+  face.querySelector('.num').textContent = pg.idx * 2 + 2;
+}
 
-  L.classList.toggle('alt', (pg.idx % 2) === 1);   // alternate ken-burns direction
-
-  if (pg._imgState === 'ok' && pg.image_url){
-    L.classList.remove('noart');
-    img.style.display = '';
-    img.src = pg.image_url;
-    // Restart the drift animation for this page.
-    img.style.animation = 'none'; void img.offsetWidth; img.style.animation = '';
-    var titled = isFirst && title;
-    P.innerHTML =
-      '<div class="wrap tt' + (titled ? '' : ' hidden') + '">' +
-        '<div class="in title">' + esc(title) + '</div></div>' +
-      '<div class="wrap bd' + (titled ? ' off' : '') + '">' +
-        '<div class="in"><p>' + esc(pg.text) + '</p></div></div>';
-    fit(P, P.querySelector('.bd .in'));
-    if (titled) fit(P, P.querySelector('.tt .in'));
-  } else {
-    // Graceful degrade: the window becomes the page.
-    L.classList.add('noart');
-    img.removeAttribute('src'); img.style.display = 'none';
-    plateP.innerHTML = (isFirst && title ? '<span class="t">' + esc(title) + '</span>' : '') + esc(pg.text);
-    P.innerHTML = '';
-    fit(plate, pwrap);
+/* Both faces of the spread the child is looking at. */
+function dress(pg){
+  dressArt(faceL, pg);
+  dressText(leafF, pg);
+  $('prose').textContent = pg.text;          // the screen-reader's copy
+  if (pg.idx > 0 && S.story && S.story.title){
+    $('running').textContent = S.story.title; $('running').classList.add('on');
   }
-  pg._slot = slot;
-
-  // Running title from page two on.
-  if (!isFirst && title){ $('running').textContent = title; $('running').classList.add('on'); }
   drawDots(pg.idx);
 }
 
@@ -762,12 +1030,10 @@ var refitT = null;
 window.addEventListener('resize', function(){
   clearTimeout(refitT);
   refitT = setTimeout(function(){
-    for (var i = 0; i < 2; i++){
-      var L = layers[i];
-      if (L.classList.contains('noart')) fit(L.querySelector('.plate'), L.querySelector('.pwrap'));
-      var ins = proses[i].querySelectorAll('.in');
-      for (var j = 0; j < ins.length; j++) fit(proses[i], ins[j]);
-    }
+    [faceR, leafF].forEach(function(face){
+      var box = face.querySelector('.txt');
+      if (box) fit(box, box.querySelector('.in'));
+    });
   }, 180);
 });
 
@@ -782,22 +1048,20 @@ function drawDots(idx){
 
 /* ======================================================================
    Turning the page
-   The cross-fade is started FADE ms before narration ends, so the new plate
-   is fully present exactly as the last word lands. If the next page isn't
-   ready we hold the current one - never a gap, never a spinner.
+   The sheet starts moving FADE ms before narration ends, so the new spread
+   is settled exactly as the last word lands. If the next page isn't ready we
+   hold the current one - never a gap, never a spinner.
    ====================================================================== */
 function show(pg, immediate){
-  var slot = 1 - front;
-  paint(pg, slot);
-
   if (immediate){
-    // The immediate path skips maybeStart's audioDone gate, so nothing else
-    // stops the voice that is already going. Without this, one reconnect
-    // restarted narration on top of the page still being read.
+    // A resync, or the first page of a story: no sheet, the book simply IS
+    // this page. This path skips maybeStart's audioDone gate, so nothing
+    // else stops a voice that is already going - without it one reconnect
+    // restarted narration on top of the page being read.
     if (S.current && S.current !== pg) stopAudio(S.current);
-    layers[front].classList.remove('on'); proses[front].classList.remove('on');
-    layers[slot].classList.add('on');     proses[slot].classList.add('on');
-    front = slot; S.current = pg; S.turning = false;
+    clearTurn();
+    dress(pg);
+    S.current = pg; S.turning = false;
     S.pending = null; S.fadeDone = true;
     startNarration(pg);
     return;
@@ -805,12 +1069,23 @@ function show(pg, immediate){
 
   S.turning = true;
   S.fadeDone = false;
-  layers[slot].classList.add('on');   proses[slot].classList.add('on');
-  layers[front].classList.remove('on'); proses[front].classList.remove('on');
-  front = slot;
+  // Dress the far side of the sheet and the page beneath it BEFORE it moves:
+  // the back of a leaf is the picture you are turning to, and under the leaf
+  // are the words that go with it.
+  dressArt(leafB, pg);
+  dressText(faceR, pg);
+  leaf.classList.add('go');
   S.current = pg;
   S.pending = pg;
-  later(function(){ S.fadeDone = true; S.turning = false; maybeStart(); }, FADE);
+  later(function(){
+    // The sheet has landed. Commit: the left page becomes what the sheet's
+    // back was showing and the sheet snaps back to zero carrying this page's
+    // words - which is already exactly what is printed underneath it, so
+    // nothing flickers as it goes.
+    dress(pg);
+    clearTurn();
+    S.fadeDone = true; S.turning = false; maybeStart();
+  }, FADE);
 }
 
 function maybeStart(){
@@ -840,15 +1115,9 @@ function startNarration(pg){
   // Its own timer, not the page pool: if narration fails we fall back to a
   // read-time dwell, which tears the pool down - and the title would be left
   // frozen on screen with the page text never arriving underneath it.
-  var tt = proses[pg._slot] ? proses[pg._slot].querySelector('.wrap.tt:not(.hidden)') : null;
-  clearTimeout(S.titleT);
-  if (tt && !tt.classList.contains('off')){
-    S.titleT = setTimeout(function(){
-      tt.classList.add('off');
-      var bd = proses[pg._slot].querySelector('.wrap.bd');
-      if (bd) bd.classList.remove('off');
-    }, Math.min(3600, Math.max(1700, readTime(pg.text) * 0.26)));
-  }
+  // The title used to hold the prose box alone for a beat and then cross-fade
+  // out of it. On a printed page it just sits above the first words and stays
+  // there, which is both simpler and more like a book.
 
   prepAudio(pg);
   var a = pg._audio;
@@ -869,8 +1138,10 @@ function startNarration(pg){
       }
     };
     a.onerror = function(){ pg._audioFailed = true; fallbackDwell(pg, ended); };
-    var p;
-    try { p = a.play(); } catch(e){ p = null; pg._audioFailed = true; }
+    var p = null;
+    // Paused before this page got its voice: the handlers are armed and we
+    // simply wait for Play.
+    if (!S.paused){ try { p = a.play(); } catch(e){ pg._audioFailed = true; } }
     if (p && p.catch) p.catch(function(){ pg._audioFailed = true; fallbackDwell(pg, ended); });
     if (pg._audioFailed) fallbackDwell(pg, ended);
     // Safety net: if the audio element stalls entirely, still turn the page.
@@ -923,8 +1194,7 @@ function finish(){
   body.classList.remove('waiting');
   setPhase('ending');
   later(function(){
-    layers[0].classList.remove('on'); layers[1].classList.remove('on');
-    proses[0].classList.remove('on'); proses[1].classList.remove('on');
+    clearTurn();
     $('running').classList.remove('on');
     $('dots').classList.remove('on');
     setPhase('over');
@@ -934,17 +1204,23 @@ function finish(){
 }
 
 function resetToIdle(){
-  clearTimers(); clearTimeout(S.titleT); clearTimeout(S.thinkT); ambienceOff();
+  clearTimers(); clearTimeout(S.thinkT); ambienceOff();
   S.pages.forEach(stopAudio);
   S.pages = new Map(); S.story = null; S.current = null;
+  S.paused = false; body.classList.remove('paused');
   S.turning = false; S.holding = false; S.ended = false;
   S.pending = null; S.fadeDone = true; S.audioDone = true;
-  layers[0].classList.remove('on','noart'); layers[1].classList.remove('on','noart');
-  proses[0].classList.remove('on'); proses[1].classList.remove('on');
-  proses[0].innerHTML = ''; proses[1].innerHTML = '';
+  clearTurn();
+  [faceL, leafB].forEach(function(f){ f.classList.remove('noart','alt');
+    f.querySelector('.art img').removeAttribute('src'); });
+  [faceR, leafF].forEach(function(f){ f.querySelector('.txt .in').innerHTML = '';
+    f.querySelector('.num').textContent = ''; });
+  [faceL, leafB].forEach(function(f){ f.querySelector('.num').textContent = ''; });
+  $('prose').textContent = '';
   $('running').classList.remove('on'); $('running').textContent = '';
   $('dots').classList.remove('on');    $('dots').innerHTML = '';
   $('echo').classList.remove('on');
+  workshopReset();
   $('invite').textContent = 'Tell me a story about…';
   $('field').value = '';
   setPhase('idle');
@@ -969,7 +1245,7 @@ function mergePage(raw){
   if (ex){
     if (raw.text) ex.text = raw.text;
     if (raw.last) ex.last = true;
-    if (iurl && !ex.image_url){ ex.image_url = iurl; ex._imgState = null; prepImage(ex); }
+    if (iurl && !ex.image_url){ ex.image_url = iurl; ex._imgState = null; prepImage(ex, artArrived); }
     if (aurl && !ex.audio_url){ ex.audio_url = aurl; ex._audioFailed = false; prepAudio(ex); }
     return null;                        // nothing new to start on
   }
@@ -1083,10 +1359,13 @@ function handle(kind, data){
       // story's title and any pages that have already arrived.
       if (S.story && S.story.story_id !== data.story_id) teardownStory();
       S.story = { story_id:data.story_id, title:data.title || '', page_count:data.page_count || 0 };
+      workshopPlan(data);
       lastReported = -1;              // a new story restarts the progress report
       setPhase('thinking');
       return;
     }
+
+    if (kind === 'build'){ workshopStage(data); return; }
 
     if (kind === 'page'){ addPage(data); return; }
 
@@ -1098,6 +1377,9 @@ function handle(kind, data){
     }
 
     if (kind === 'end'){
+      // The child pressed "a new story": we are already back at the candle and
+      // the stop we sent is what produced this frame. Do not re-run goodnight.
+      if (S.phase === 'idle') return;
       // Goodnight from a story that is already over and replaced.
       if (data.story_id != null && S.story && S.story.story_id != null &&
           data.story_id !== S.story.story_id) return;
@@ -1121,7 +1403,7 @@ function handle(kind, data){
    Transport: SSE, with a silent poll fallback if it keeps dying.
    ====================================================================== */
 var es = null, sseFails = 0, polling = null;
-var KINDS = ['hello','state','story','page','notice','end','ping'];
+var KINDS = ['hello','state','story','page','build','notice','end','ping'];
 
 function connect(){
   if (!window.EventSource){ startPolling(); return; }
@@ -1223,7 +1505,10 @@ var spaceDown = 0;
 document.addEventListener('keydown', function(e){
   if (e.target === $('field')) return;
   if (e.code === 'Space' && !spaceDown) spaceDown = Date.now();
-  if (e.key === 'Escape') stopNow();
+  if (e.key === 'Escape'){
+    if ($('shelf').classList.contains('show')) return closeShelf();
+    stopNow();
+  }
 });
 document.addEventListener('keyup', function(e){
   if (e.target === $('field')) return;
@@ -1281,7 +1566,13 @@ function demoPlate(seed){
 }
 function demoRun(text){
   var title = 'Biscuit and the Dragon Who Kept the Lights On';
-  later(function(){ handle('story', { story_id:1, title:title, page_count:3 }); }, 900);
+  // The spine too, so the demo previews the workshop the same way a real
+  // story does - it is the only way to look at that screen without a device.
+  later(function(){ handle('story', { story_id:1, title:title, page_count:3, spine:[
+    'Biscuit is not afraid of the dark, but the dragon is.',
+    'He carries a small warm lamp up the hill to him.',
+    'They watch the stars come out, and everyone sleeps.'
+  ] }); }, 900);
   var body3 = [
     'Biscuit had one folded ear and a red collar, and he was not afraid of the dark at all. ' +
     'But the dragon in the forest was. Every night he blinked his big worried eyes and kept the whole sky lit.',
@@ -1298,11 +1589,142 @@ function demoRun(text){
   void text;
 }
 
+/* ----------------------------------------------------------------------
+   The workshop: what the lantern is doing, while it does it.
+   ---------------------------------------------------------------------- */
+var STAGE = {
+  writing:  'writing this page',
+  checking: 'making sure it is kind',
+  voicing:  'finding the voice',
+  painting: 'painting the picture'
+};
+
+function workshopReset(){
+  body.classList.remove('planned');
+  $('wsTitle').textContent = ''; $('wsTitle').classList.remove('on');
+  $('wsLine').textContent = 'the lantern is dreaming up your story';
+  $('wsDots').style.display = '';
+  $('wsBoard').innerHTML = '';
+}
+
+/* The beats arrive all at once when the plan lands. They come in one after
+   another anyway - eight plates appearing together is a jolt, eight appearing
+   over a second and a half is a story being laid out on a table. */
+function workshopPlan(story){
+  var beats = story.spine || [];
+  if (story.title){ $('wsTitle').textContent = story.title; $('wsTitle').classList.add('on'); }
+  if (!beats.length) return;
+  body.classList.add('planned');
+  $('wsDots').style.display = 'none';
+  // The plan exists; saying "dreaming" under a title and eight beats is the
+  // kind of small lie that makes the whole screen feel fake. The first build
+  // frame replaces this within a second.
+  $('wsLine').textContent = 'laying out the pages';
+  $('wsBoard').innerHTML = beats.map(function(b, i){
+    return '<div class="pl" id="pl' + i + '" style="animation-delay:' + (i * 0.16).toFixed(2) + 's">' +
+           '<div class="plate"></div><div class="beat">' + esc(b) + '</div></div>';
+  }).join('');
+}
+
+function workshopStage(d){
+  if (S.story && d.story_id != null && d.story_id !== S.story.story_id) return;
+  var i = Number(d.idx) || 0, el = $('pl' + i);
+  $('wsLine').innerHTML = 'page <i>' + (i + 1) + '</i> &middot; ' +
+                          esc(STAGE[d.stage] || d.stage || '');
+  if (!el) return;
+  for (var k = 0; k < i; k++){ var prev = $('pl' + k); if (prev){ prev.classList.remove('now'); prev.classList.add('done'); } }
+  el.classList.add('now');
+}
+
+/* ======================================================================
+   The buttons, and the shelf
+   Pause holds both halves of a page: the voice (on the audio element) and the
+   clock that turns the page when there is no voice (inside pageLater). The
+   shelf replays a story straight from the database - no device, no waiting.
+   ====================================================================== */
+function updateBar(){
+  var reading = (S.phase === 'telling' || S.phase === 'ending');
+  var live    = reading || S.phase === 'thinking';
+  $('bPause').hidden = !reading || S.paused;
+  $('bPlay').hidden  = !reading || !S.paused;
+  $('bNew').hidden   = !live;
+  $('bar').classList.add('show');
+}
+
+function setPaused(on){
+  S.paused = !!on;
+  body.classList.toggle('paused', S.paused);
+  var pg = S.current;
+  if (pg && pg._audio && !pg._audioFailed){
+    try { if (S.paused) pg._audio.pause(); else pg._audio.play(); } catch(e){}
+  }
+  updateBar();
+}
+
+/* Straight back to the candle. finish()'s goodnight chain takes ten seconds,
+   which is ten seconds of a child staring at a screen that is ignoring them. */
+function newStory(){
+  setPaused(false);
+  if (!DEMO) jpost('/api/stop', {}, function(){});
+  resetToIdle();
+  if (!('ontouchstart' in window)) { try{ $('field').focus(); }catch(e){} }
+}
+
+function openShelf(){
+  var list = $('shelfList'), empty = $('shelfEmpty');
+  list.innerHTML = ''; empty.hidden = true;
+  $('shelf').classList.add('show');
+  jget('/api/stories', function(d){
+    var all = ((d && d.stories) || []).filter(function(st){ return st.pages > 0; });
+    if (!all.length){ empty.hidden = false; return; }
+    list.innerHTML = all.map(function(st){
+      var cov = st.cover ? '<img class="cv" src="' + esc(st.cover) + '" alt="">'
+                         : '<div class="cv"></div>';
+      return '<button class="bk" type="button" data-id="' + st.id + '">' + cov +
+             '<div class="ttl">' + esc(st.title || st.request || 'A story') +
+             '<span class="sub">' + st.pages + (st.pages === 1 ? ' page' : ' pages') +
+             '</span></div></button>';
+    }).join('');
+  });
+}
+function closeShelf(){ $('shelf').classList.remove('show'); }
+
+function replay(id){
+  setPaused(false);
+  resetToIdle();
+  setPhase('thinking');
+  jpost('/api/story/' + id + '/replay', {}, function(d){
+    if (!d) { notice('that story will not open just now'); resetToIdle(); }
+  });
+}
+
+$('bPause').addEventListener('click', function(){ setPaused(true); });
+$('bPlay').addEventListener('click',  function(){ setPaused(false); });
+$('bNew').addEventListener('click', newStory);
+$('bShelf').addEventListener('click', function(){
+  if ($('shelf').classList.contains('show')) closeShelf(); else openShelf();
+});
+$('shelfBack').addEventListener('click', closeShelf);
+// The list fills the whole overlay, so a tap on the empty space below the
+// books lands on the list, not the backdrop. Both have to close it.
+['shelf','shelfList'].forEach(function(id){
+  $(id).addEventListener('click', function(e){ if (e.target === $(id)) closeShelf(); });
+});
+$('shelfList').addEventListener('click', function(e){
+  var b = e.target && e.target.closest ? e.target.closest('.bk') : null;
+  if (!b) return;
+  closeShelf();
+  replay(Number(b.getAttribute('data-id')));
+});
+
 /* ======================================================================
    Go
    ====================================================================== */
 setPhase('idle');
 if (!DEMO) connect();
+// ?demo=1&go runs the fake story without a hand on the keyboard, which is how
+// the page turn and the workshop get reviewed on a machine with no device.
+if (DEMO && /[?&]go\b/.test(location.search)) setTimeout(function(){ ask('a dragon who is scared of the dark'); }, 400);
 // Focus the field on a desktop only; on a tablet this would raise the
 // on-screen keyboard over the candle, which is exactly wrong at bedtime.
 if (!('ontouchstart' in window)) { try{ $('field').focus(); }catch(e){} }
