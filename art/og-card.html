@@ -1,0 +1,41 @@
+<!-- The share card. Render it back to og.png with:
+     chrome --headless --allow-file-access-from-files --window-size=1200,630 \
+            --screenshot=../og.png art/og-card.html
+     Illustration by Jason; the empty left third of it is deliberate. -->
+<!doctype html><meta charset=utf-8>
+<style>
+  :root{ --cream:#f0e2c6; --amber:#ffb968; --amber-deep:#d9782a;
+         --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1200px;height:630px;overflow:hidden;position:relative;background:#0d1020}
+  #art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:52% 50%}
+  /* A touch more darkness on the left so type has something to sit on, feathered
+     out well before it reaches the lantern. */
+  #scrim{position:absolute;inset:0;
+    background:linear-gradient(95deg, rgba(6,9,20,.72) 0%, rgba(6,9,20,.52) 22%,
+               rgba(6,9,20,.18) 38%, transparent 52%)}
+  #type{position:absolute;left:66px;top:50%;transform:translateY(-50%);width:430px;
+    font-family:var(--serif);color:var(--cream)}
+  h1{font-weight:400;font-size:76px;line-height:.98;letter-spacing:.004em;
+     text-shadow:0 3px 26px rgba(0,0,0,.75)}
+  h1 span{display:block}
+  .rule{width:186px;height:6px;margin:28px 0 24px;
+    background-image:
+      radial-gradient(circle, var(--amber) 0 3.4px, transparent 4px),
+      linear-gradient(90deg, rgba(255,185,104,.95), rgba(255,185,104,.30));
+    background-size:100% 100%, 100% 2px;
+    background-position:center, center; background-repeat:no-repeat;
+    filter:drop-shadow(0 0 10px rgba(255,160,60,.45))}
+  p{font-size:25px;line-height:1.42;opacity:.9;text-shadow:0 2px 14px rgba(0,0,0,.8)}
+  #foot{position:absolute;left:68px;bottom:44px;display:flex;align-items:center;gap:13px;
+    font-family:var(--serif);color:var(--cream);opacity:.62;font-size:15px;letter-spacing:.06em}
+  #foot img{width:74px;display:block;opacity:.92}
+</style>
+<img id="art" src="hero.png" alt="">
+<div id="scrim"></div>
+<div id="type">
+  <h1><span>Story</span><span>Lantern</span></h1>
+  <div class="rule"></div>
+  <p>A bedside lamp your kid talks to. It writes, paints and reads a brand-new story, all on the nightstand.</p>
+</div>
+<div id="foot">runs entirely on <img src="../static/tiiny-logo.svg" alt="Tiiny"></div>
