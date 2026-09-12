@@ -1,0 +1,51 @@
+{
+  "manifest": 1,
+  "id": "story-lantern",
+  "name": "Story Lantern",
+  "tagline": "A bedside lamp your kid talks to.",
+  "description": "They ask for a story. Half a minute later a painted page appears in an open book and a warm voice starts reading one that has never existed before. Their characters come back next time looking and acting the same.",
+  "author": {"name": "Jason Brashear", "github": "webdevtodayjason"},
+  "license": "MIT",
+  "repo": "https://github.com/webdevtodayjason/story-lantern",
+  "icon": "static/tiiny-logo.svg",
+  "categories": ["kids", "storytelling", "voice", "images"],
+
+  "needs": {
+    "models": [
+      {"id": "deepreinforce-ai/Ornith-1.0-35B", "npu": 50,
+       "role": "writes the story, and checks every page before a child hears it",
+       "required": true},
+      {"id": "Tongyi-MAI/Z-Image-Turbo", "npu": 32,
+       "role": "paints each page, 512x512, about 8 seconds",
+       "required": true},
+      {"id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "npu": 7,
+       "role": "reads the story out loud",
+       "required": true, "managed": true}
+    ],
+    "npu_resident": 82,
+    "npu_peak": 89,
+    "runtime": {"python": ">=3.9", "deps": []},
+    "disk_mb": 5000
+  },
+
+  "asks_for": [
+    {"what": "device-key", "why": "to ask your Tiiny for the story, the pictures and the voice"},
+    {"what": "network-lan", "why": "to reach the Tiiny on your own network"},
+    {"what": "disk", "why": "every story is kept with its pictures and narration so a child can hear it again", "path": "~/.lantern"}
+  ],
+
+  "provides": {"web": {"port": 8420, "path": "/show"}},
+
+  "plant": {
+    "get": "git clone https://github.com/webdevtodayjason/story-lantern",
+    "run": "python3 lantern.py",
+    "check": "python3 lantern.py --selfcheck",
+    "env": ["TIINY_HOST", "TIINY_KEY"]
+  },
+
+  "privacy": {
+    "egress": "none",
+    "telemetry": false,
+    "stores": "Stories, illustrations, narration and a parent-readable log of every safety verdict. All of it on your own disk."
+  }
+}
