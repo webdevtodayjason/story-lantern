@@ -36,7 +36,9 @@ Python 3.11+, standard library only.
 --------------------------------------------------------------------------------
 DEVICE NOTES (verified on hardware, do not "fix" these)
 --------------------------------------------------------------------------------
-* Base URL  http://$TIINY_HOST:8800   header  Authorization: Bearer $TIINY_KEY
+* Base URL is resolved by device.py, not hardcoded. Firmware 1.0 refuses port 8800
+  from another machine and serves the gateway on 80 instead; older firmware uses 8800.
+  header  Authorization: Bearer <key from TIINY_KEY or the farm's device file>
 * Ornith-1.0-35B puts its reasoning in message.reasoning_content and that text COUNTS
   AGAINST max_tokens. With a small budget message.content comes back EMPTY. So the
   classifier uses max_tokens=900 (NOT the 12 in the spec - 12 returns nothing at all)
@@ -63,46 +65,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import device  # noqa: E402  - beside this file, not a package
+
 # --------------------------------------------------------------------------------------
 # Configuration
 # --------------------------------------------------------------------------------------
 
 CHARTER_VERSION = "lantern-charter-1.0.0"
 
-TIINY_HOST = os.environ.get("TIINY_HOST", "tiiny.local")
-TIINY_KEY = os.environ.get("TIINY_KEY", "")
-def _gateway_port(host, timeout=2.0):
-    """Which port serves the AI gateway on this device.
+# The device is found, not configured, and it is found LAZILY. This module used to
+# call the gateway probe at import time, which meant `import safety` spent two
+# network timeouts on a machine with no Tiiny on it, and pinned an address read
+# from the environment before anyone had a chance to set one. TIINY_BASE_URL still
+# overrides everything, for a test fake or a tunnel.
+def _endpoint() -> tuple:
+    """(base url, bearer key) for the device, worked out on first use."""
+    override = os.environ.get("TIINY_BASE_URL")
+    if override:
+        return override.rstrip("/"), device.key_from_env()
+    dev = device.current()
+    return dev.base_url, dev.key
 
-    Firmware 1.0.0 moved it. The gateway now binds 172.17.0.1:8800, the docker
-    bridge only, and serves the same surface on port 80. Older firmware keeps it
-    on 8800 and uses 80 for device management, so a plain TCP probe cannot tell
-    the two apart - port 80 answers on both. Asking for an AI route can: the
-    firmware that does not serve it 404s.
-
-    TIINY_PORT overrides, for anyone who has put it somewhere else.
-    """
-    env = os.environ.get("TIINY_PORT")
-    if env:
-        return int(env)
-    for port in (80, 8800):
-        try:
-            req = urllib.request.Request(
-                "http://%s:%d/v1/models" % (host, port),
-                headers={"Authorization": "Bearer probe"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                if r.status != 404:
-                    return port
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:      # 401 still means the gateway is here
-                return port
-        except Exception:            # noqa: BLE001 - unreachable; try the next
-            continue
-    return 80
-
-
-TIINY_PORT = _gateway_port(TIINY_HOST)
-BASE_URL = os.environ.get("TIINY_BASE_URL") or f"http://{TIINY_HOST}:{TIINY_PORT}"
 
 ORNITH_MODEL = os.environ.get("LANTERN_ORNITH_MODEL", "deepreinforce-ai/Ornith-1.0-35B")
 
@@ -712,10 +696,11 @@ class DeviceBusy(RuntimeError):
 
 def _post_json(path: str, payload: dict, timeout: int = CLASSIFY_TIMEOUT) -> dict:
     body = json.dumps(payload).encode("utf-8")
+    base, key = _endpoint()
     req = urllib.request.Request(
-        f"{BASE_URL}{path}", data=body, method="POST",
+        f"{base}{path}", data=body, method="POST",
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {TIINY_KEY}"})
+                 "Authorization": f"Bearer {key}"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8", "replace"))
@@ -1439,8 +1424,8 @@ def _selftest(live: bool = False) -> int:
 
     if live:
         print("\n### LAYER 4 - model classifier (LIVE against the device)\n")
-        if not TIINY_KEY:
-            print("  TIINY_KEY not set; skipping.")
+        if not device.key_from_env():
+            print("  no device key found; skipping.")
         else:
             for text, expected, note in _PAGE_CASES[:4]:
                 if not text:
