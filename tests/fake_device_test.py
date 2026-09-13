@@ -15,13 +15,24 @@ two stories (including a fuzzy-matched misspelling).
 import json, os, shutil, sys, tempfile, threading, time, urllib.error, urllib.request
 
 HOME = tempfile.mkdtemp(prefix="lantern-test-")
-os.environ["TIINY_HOST"] = "127.0.0.1"
+# TIINY_BASE is the top of the resolver chain, so it beats anything the machine
+# running the tests happens to have in ~/.tiinyapps/device.json. Without that,
+# a developer with a real Tiiny planted by the farm would find this harness
+# pointed at their actual hardware.
+os.environ["TIINY_BASE"] = "http://127.0.0.1:8899"
 os.environ["TIINY_KEY"] = "fake"
 os.environ["LANTERN_HOME"] = HOME
 os.environ["PORT"] = "8499"
+os.environ.pop("TIINY_HOST", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import lantern as L  # noqa: E402
+
+# Pin the device outright: nothing in this harness may touch a network, and that
+# includes the gateway port probe.
+L.device.set_current(L.device.Device(
+    host="127.0.0.1", port=8899, key="fake", source="the offline harness",
+    plane="given", serial="FAKE-SERIAL-0001"))
 
 PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
 MP3 = (b"\xff\xfb\x90\x00" + b"\x00" * 64)

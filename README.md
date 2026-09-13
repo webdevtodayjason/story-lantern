@@ -135,14 +135,45 @@ but gets small.
 
 ---
 
+## Finding the Tiiny
+
+You do not configure the address. Firmware 1.0 moved the AI gateway off port 8800, which it
+now binds on the container bridge only, and a box's LAN address is a DHCP lease that moves,
+so an address typed into a config file goes stale on its own. `device.py` works it out, in
+this order, and logs which step answered:
+
+| Step | What it is |
+|---|---|
+| `TIINY_BASE` | what the farm CLI exports. A full URL is fine; a port in it pins the gateway port |
+| `~/.tiinyapps/device.json` | what `farm device` writes: `{"base": ..., "key": ...}` |
+| `TIINY_HOST` | the name this app documented first. Still honoured |
+| a scan | every USB `/30` peer, then this machine's own `/24`, on `:39218` |
+
+The scan reads the unauthenticated `http://<addr>:39218/device.json`, which carries the
+serial number, so it identifies a box rather than just finding an open port. A box answering
+on both Wi-Fi and USB is recognised as one box and the USB address wins, because a `/30`
+handed out by the cable cannot move. If two different boxes answer it lists them and stops
+rather than picking one for you.
+
+Only the key still has to come from somewhere: `TIINY_KEY`, or the farm's device file.
+
+```
+$ python3 device.py
+  http://192.168.100.94:80  found by a scan  lan plane  serial TNYM26072400300011Q
+```
+
+---
+
 ## Configuration
 
-Environment, all optional except the two device settings:
+Environment, all optional except the device key:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TIINY_HOST` | - | device address (**required**), host only - `:8800` is added for you |
 | `TIINY_KEY` | - | device API key (**required**) |
+| `TIINY_BASE` | *found* | device address or base URL, if you want to pin one |
+| `TIINY_HOST` | *found* | the same thing, older name |
+| `TIINY_PORT` | *probed* | pin the gateway port instead of asking the box |
 | `PORT` | `8420` | web port |
 | `LANTERN_HOME` | `~/.lantern` | everything it keeps: database, generated media |
 | `LANTERN_DB` | `$LANTERN_HOME/lantern.db` | SQLite state |
@@ -161,8 +192,15 @@ the file.
 
 ## Troubleshooting
 
-**`Set TIINY_HOST and TIINY_KEY`** - it will not start without both. `TIINY_HOST` is a bare
-host or IP. Do not include `http://` or a port; the code appends `:8800`.
+**`Set TIINY_KEY`** - the address is found for you, but the key is not. Set `TIINY_KEY`, or
+let the farm write `~/.tiinyapps/device.json`.
+
+**`No Tiiny found`** - run `python3 device.py` to see what was tried. The scan only sweeps the
+`/24` this machine sits in, so a box on another subnet needs `TIINY_BASE`. A box that is only
+on USB needs the cable actually attached: look for a `172.17.x.x` address in `ifconfig`.
+
+**`More than one Tiiny answered`** - that is the app refusing to pick for you. Set
+`TIINY_BASE` to the one you want; the serials are printed to tell them apart.
 
 **The narration never plays.** The kiosk is missing
 `--autoplay-policy=no-user-gesture-required`. In an ordinary browser tab, any click on the

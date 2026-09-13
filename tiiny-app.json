@@ -2,6 +2,7 @@
   "manifest": 1,
   "id": "story-lantern",
   "name": "Story Lantern",
+  "version": "0.1.1",
   "tagline": "A bedside lamp your kid talks to.",
   "description": "They ask for a story. Half a minute later a painted page appears in an open book and a warm voice starts reading one that has never existed before. Their characters come back next time looking and acting the same.",
   "author": {"name": "Jason Brashear", "github": "webdevtodayjason"},
@@ -40,7 +41,7 @@
     "get": "git clone https://github.com/webdevtodayjason/story-lantern",
     "run": "python3 lantern.py",
     "check": "python3 lantern.py --selfcheck",
-    "env": ["TIINY_HOST", "TIINY_KEY"]
+    "env": ["TIINY_BASE", "TIINY_KEY"]
   },
 
   "privacy": {

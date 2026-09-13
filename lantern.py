@@ -17,8 +17,11 @@ CustomVoice).
     python3 lantern.py --selftest "a story about a brave snail"
 
 Environment:
-    TIINY_HOST     device IP or hostname          (required)
     TIINY_KEY      device bearer key              (required)
+    TIINY_BASE     device address, if you want to pin one. Otherwise the
+                   device is found: the farm's ~/.tiinyapps/device.json,
+                   then TIINY_HOST, then a scan of the USB links and this
+                   machine's own /24 on :39218. See device.py
     LANTERN_HOME   state directory                (default ~/.lantern)
     PORT           http port                      (default 8420)
 
@@ -75,7 +78,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION = "0.1.0"
+sys.path.insert(0, APP_DIR)
+import device  # noqa: E402  - beside this file, not a package
+VERSION = "0.1.1"
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -106,40 +111,14 @@ NEGATIVE_PROMPT = (
 MIN_MAX_TOKENS = 800
 
 
-def _gateway_port(host, timeout=2.0):
-    """Which port serves the AI gateway on this device.
-
-    Firmware 1.0.0 moved it. The gateway now binds 172.17.0.1:8800, the docker
-    bridge only, and serves the same surface on port 80. Older firmware keeps it
-    on 8800 and uses 80 for device management, so a plain TCP probe cannot tell
-    the two apart - port 80 answers on both. Asking for an AI route can: the
-    firmware that does not serve it 404s.
-
-    TIINY_PORT overrides, for anyone who has put it somewhere else.
-    """
-    env = os.environ.get("TIINY_PORT")
-    if env:
-        return int(env)
-    for port in (80, 8800):
-        try:
-            req = urllib.request.Request(
-                "http://%s:%d/v1/models" % (host, port),
-                headers={"Authorization": "Bearer probe"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                if r.status != 404:
-                    return port
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:      # 401 still means the gateway is here
-                return port
-        except Exception:            # noqa: BLE001 - unreachable; try the next
-            continue
-    return 80
-
-
 @dataclass
 class Config:
-    host: str = os.environ.get("TIINY_HOST", "")
-    key: str = os.environ.get("TIINY_KEY", "")
+    # The device is not configured here any more. device.py works out where it
+    # is and which port serves the gateway, because firmware 1.0 refuses 8800
+    # from another machine and a box's LAN address is a DHCP lease that moves.
+    # An address set here, or in TIINY_BASE, still wins over the search.
+    host: str = ""
+    key: str = ""
     port: int = int(os.environ.get("PORT", "8420"))
     home: str = os.environ.get("LANTERN_HOME", os.path.expanduser("~/.lantern"))
 
@@ -161,9 +140,24 @@ class Config:
     device_call_keep_days: int = 30  # the request transcript is a log, not an archive
     safety_event_keep: int = 5000    # safety events are kept longest of all
 
+    def device(self) -> "device.Device":
+        """The box we are talking to, resolved once and remembered.
+
+        This used to be a property that re-probed the gateway port on every
+        access, so every device job paid two HTTP probes before it sent
+        anything. Resolving once is both faster and the only way the log can
+        say honestly which box a story came from.
+        """
+        dev = device.current(self.host)
+        if not self.host:
+            self.host = dev.host
+        if not self.key:
+            self.key = dev.key
+        return dev
+
     @property
     def base_url(self) -> str:
-        return f"http://{self.host}:{_gateway_port(self.host)}"
+        return self.device().base_url
 
     @property
     def media_dir(self) -> str:
@@ -3019,8 +3013,20 @@ class LanternServer(http.server.ThreadingHTTPServer):
 # --------------------------------------------------------------------------
 
 def require_device() -> None:
-    if not CFG.host or not CFG.key:
-        sys.exit("Set TIINY_HOST and TIINY_KEY (the device IP and bearer key).")
+    """Find the Tiiny and the key, or say what to do about it and stop.
+
+    The address is no longer something a person has to supply: TIINY_BASE, the
+    farm's device file, TIINY_HOST and then a scan of the USB links and this
+    machine's own /24. Only the key has to come from somewhere.
+    """
+    try:
+        dev = CFG.device()
+    except device.NotFound as exc:
+        sys.exit("  " + str(exc))
+    log(f"device {dev.describe()}")
+    if not dev.key:
+        sys.exit("Set TIINY_KEY, or let the farm write ~/.tiinyapps/device.json. "
+                 "The device will not answer without a bearer key.")
 
 
 def serve(lantern: Lantern) -> None:
