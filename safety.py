@@ -71,7 +71,37 @@ CHARTER_VERSION = "lantern-charter-1.0.0"
 
 TIINY_HOST = os.environ.get("TIINY_HOST", "tiiny.local")
 TIINY_KEY = os.environ.get("TIINY_KEY", "")
-TIINY_PORT = int(os.environ.get("TIINY_PORT", "8800"))
+def _gateway_port(host, timeout=2.0):
+    """Which port serves the AI gateway on this device.
+
+    Firmware 1.0.0 moved it. The gateway now binds 172.17.0.1:8800, the docker
+    bridge only, and serves the same surface on port 80. Older firmware keeps it
+    on 8800 and uses 80 for device management, so a plain TCP probe cannot tell
+    the two apart - port 80 answers on both. Asking for an AI route can: the
+    firmware that does not serve it 404s.
+
+    TIINY_PORT overrides, for anyone who has put it somewhere else.
+    """
+    env = os.environ.get("TIINY_PORT")
+    if env:
+        return int(env)
+    for port in (80, 8800):
+        try:
+            req = urllib.request.Request(
+                "http://%s:%d/v1/models" % (host, port),
+                headers={"Authorization": "Bearer probe"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 404:
+                    return port
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:      # 401 still means the gateway is here
+                return port
+        except Exception:            # noqa: BLE001 - unreachable; try the next
+            continue
+    return 80
+
+
+TIINY_PORT = _gateway_port(TIINY_HOST)
 BASE_URL = os.environ.get("TIINY_BASE_URL") or f"http://{TIINY_HOST}:{TIINY_PORT}"
 
 ORNITH_MODEL = os.environ.get("LANTERN_ORNITH_MODEL", "deepreinforce-ai/Ornith-1.0-35B")

@@ -106,6 +106,36 @@ NEGATIVE_PROMPT = (
 MIN_MAX_TOKENS = 800
 
 
+def _gateway_port(host, timeout=2.0):
+    """Which port serves the AI gateway on this device.
+
+    Firmware 1.0.0 moved it. The gateway now binds 172.17.0.1:8800, the docker
+    bridge only, and serves the same surface on port 80. Older firmware keeps it
+    on 8800 and uses 80 for device management, so a plain TCP probe cannot tell
+    the two apart - port 80 answers on both. Asking for an AI route can: the
+    firmware that does not serve it 404s.
+
+    TIINY_PORT overrides, for anyone who has put it somewhere else.
+    """
+    env = os.environ.get("TIINY_PORT")
+    if env:
+        return int(env)
+    for port in (80, 8800):
+        try:
+            req = urllib.request.Request(
+                "http://%s:%d/v1/models" % (host, port),
+                headers={"Authorization": "Bearer probe"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 404:
+                    return port
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:      # 401 still means the gateway is here
+                return port
+        except Exception:            # noqa: BLE001 - unreachable; try the next
+            continue
+    return 80
+
+
 @dataclass
 class Config:
     host: str = os.environ.get("TIINY_HOST", "")
@@ -133,7 +163,7 @@ class Config:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host}:8800"
+        return f"http://{self.host}:{_gateway_port(self.host)}"
 
     @property
     def media_dir(self) -> str:
