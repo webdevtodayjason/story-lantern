@@ -30,13 +30,18 @@ number. That is what lets a box answering on both Wi-Fi and USB be recognised as
 one box, and what makes it safe to prefer the USB address: a /30 handed out by
 the cable cannot move, and a DHCP lease can.
 
-Standard library only, like everything else here.
+Standard library only, and no subprocess. Working out which addresses this
+machine holds used to mean reading the output of `ip` or `ifconfig`, which is a
+shell call in all but name, and tiinyapp.farm refuses an archive that contains
+one. Sockets answer the same question: a UDP connect to a documentation address
+sends no packet and tells us our own address on the route, and bind() succeeds
+only on an address this host really holds, which finds the USB links.
 """
 from __future__ import annotations
 
 import json
 import os
-import subprocess
+import socket
 import threading
 import urllib.error
 import urllib.parse
@@ -185,57 +190,43 @@ def device_json(addr: str, timeout: float = 0.6):
     return got
 
 
-def _mask_bits(mask: str) -> int:
-    """Prefix length from either form of netmask a system tool prints."""
-    if mask.startswith("0x"):
-        return bin(int(mask, 16)).count("1")
-    parts = [int(x) for x in mask.split(".")]
-    if len(parts) != 4:
-        raise ValueError(mask)
-    n = 0
-    for part in parts:
-        n = (n << 8) | part
-    return bin(n).count("1")
+def own_lan_address() -> str:
+    """The address a Tiiny on the LAN would see this machine as, or "".
 
-
-def interfaces() -> list:
-    """(address, prefix length) for every IPv4 this machine holds.
-
-    Standard library only, so this asks the system's own tool: `ip` on Linux,
-    `ifconfig` on macOS and the BSDs. A machine where neither runs simply
-    contributes no candidates.
+    A UDP socket that "connects" sends no packet: the kernel picks the route and
+    binds a local address, and reading it back is a routing-table lookup rather
+    than traffic. Both probes are documentation addresses that are never routed
+    anywhere, so nothing leaves the machine either way.
     """
-    out = []
-    try:
-        txt = subprocess.run(["ip", "-o", "-4", "addr", "show"],
-                             capture_output=True, text=True, timeout=5).stdout
-        for line in txt.splitlines():
-            for field in line.split():
-                if "/" in field and field[0].isdigit():
-                    addr, _, prefix = field.partition("/")
-                    try:
-                        out.append((addr, int(prefix)))
-                    except ValueError:
-                        pass
-                    break
-    except Exception:
-        pass
-    if out:
-        return out
-    try:
-        txt = subprocess.run(["ifconfig", "-a"], capture_output=True,
-                             text=True, timeout=5).stdout
-    except Exception:
-        return out
-    for line in txt.splitlines():
-        field = line.split()
-        if not field or field[0] != "inet" or "netmask" not in field:
-            continue
+    for probe in ("192.0.2.1", "198.51.100.1"):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            out.append((field[1], _mask_bits(field[field.index("netmask") + 1])))
-        except (ValueError, IndexError):
+            sock.connect((probe, 9))
+            addr = sock.getsockname()[0]
+            if addr and not addr.startswith("127."):
+                return addr
+        except OSError:
             continue
-    return out
+        finally:
+            sock.close()
+    return ""
+
+
+def is_local(addr: str) -> bool:
+    """Does this address belong to this machine? bind() is the only one who knows.
+
+    bind() succeeds on an address the host actually holds and fails with
+    EADDRNOTAVAIL on every other one, so it answers the question a list of
+    interfaces used to, without running anything.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind((addr, 0))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 
 def usb_peers() -> list:
@@ -245,44 +236,34 @@ def usb_peers() -> list:
     box takes the first usable one and this machine the second. So the peer is
     arithmetic rather than a guess, and somebody with several boxes plugged in
     has one of these per cable.
+
+    Which /30s are attached is settled by bind(), one call per usable address in
+    172.17/16. All 32768 of them cost about four tenths of a second on a laptop,
+    and they only run when nothing has already said where the box is.
     """
     peers = []
-    for addr, bits in interfaces():
-        if bits != 30 or not addr.startswith(USB_NET):
-            continue
-        try:
-            octets = [int(x) for x in addr.split(".")]
-        except ValueError:
-            continue
-        n = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
-        base = n & ~3
-        for cand in (base + 1, base + 2):
-            if cand != n:
-                peers.append("%d.%d.%d.%d" % (
-                    (cand >> 24) & 255, (cand >> 16) & 255,
-                    (cand >> 8) & 255, cand & 255))
+    for third in range(256):
+        for base in range(0, 256, 4):
+            for ours, theirs in ((base + 2, base + 1), (base + 1, base + 2)):
+                if is_local("%s%d.%d" % (USB_NET, third, ours)):
+                    peers.append("%s%d.%d" % (USB_NET, third, theirs))
+                    break
     return peers
 
 
 def lan_candidates() -> list:
-    """Every other address in the /24 around each of this machine's addresses.
+    """Every other address in the /24 this machine sits in.
 
     A /24 is 254 probes, about a second threaded, and it is the only thing that
-    finds a box whose DHCP lease moved. Only the /24 this machine sits in:
-    sweeping a /16 to locate a Tiiny is not something a bedside appliance should
-    do to somebody's network.
+    finds a box whose DHCP lease moved. Only that /24: sweeping a /16 to locate a
+    Tiiny is not something a bedside appliance should do to somebody's network.
     """
-    out, seen = [], set()
-    for addr, bits in interfaces():
-        if addr.startswith("127.") or addr.startswith(USB_NET) or bits >= 31:
-            continue
-        head = addr.rsplit(".", 1)[0]
-        for i in range(1, 255):
-            cand = "%s.%d" % (head, i)
-            if cand != addr and cand not in seen:
-                seen.add(cand)
-                out.append(cand)
-    return out
+    mine = own_lan_address()
+    if not mine or mine.startswith(USB_NET):
+        return []
+    head = mine.rsplit(".", 1)[0]
+    return [addr for addr in ("%s.%d" % (head, i) for i in range(1, 255))
+            if addr != mine]
 
 
 def scan(timeout: float = 0.6, workers: int = 64) -> list:
