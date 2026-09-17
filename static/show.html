@@ -18,7 +18,9 @@
   POST /api/stop          {}                -> 200               stop now
   GET  /api/state         optional. Same body as the `hello` event. Used only
                           as a fallback if SSE dies repeatedly; a 404 here is
-                          harmless and stays invisible.
+                          harmless and stays invisible. It may also carry
+                          "reason" (see `end`), which is the only way a failure
+                          reaches the display while the event stream is down.
   GET  /media/<story>/... the image_url / audio_url paths handed out in events.
   GET  /media/pageturn.wav  optional 4s ambience for the stall case. 404 is fine.
 
@@ -39,7 +41,16 @@
               May arrive out of order and well ahead of display (prefetch).
     notice  {line:"..."}   a soft, human line. NOT an error. e.g.
               "the lantern is dreaming, try again in a moment"
-    end     {reason:"finished"|"stopped"|"failed", line?:"..."}
+    end     {reason:"finished"|"stopped"|"failed"
+             |"no_storyteller"|"device_unreachable", line?:"..."}
+              The last two mean the story never began - no storyteller on the
+              device, or no device answering. They do NOT say goodnight: they
+              raise a calm card that waits for a grown-up, and they ignore
+              `line`, so a sentence written for a parent cannot reach a child
+              even if the server sends one.
+    trouble {reason:"no_storyteller"|"device_unreachable"}
+              Optional alias for those two, for a server that would rather name
+              the frame than overload the ending. Same card either way.
     ping    {}             heartbeat, ignored.
 
   Field aliases accepted, so a small naming drift in the server can't break the
@@ -57,9 +68,13 @@
     breathes, optional ambience loops. No spinner, ever, at any point.
   * SSE drops                   -> EventSource reconnects silently; after
     repeated failures we quietly poll /api/state.
+  * no storyteller / no device  -> the one failure that is NOT degradable: the
+    lantern cannot begin at all. A card asks for a grown-up and waits there.
 
   ?demo=1 renders a fake three-page story with canvas-painted plates so the
-  visuals can be reviewed with no device attached.
+  visuals can be reviewed with no device attached. ?demo=no_storyteller and
+  ?demo=device_unreachable play the bad night the same way, so the card can be
+  looked at without arranging a real failure.
 ==========================================================================
 -->
 <style>
@@ -576,6 +591,62 @@ body[data-phase="over"] #field{ opacity:0; pointer-events:none }
   padding:clamp(26px,7vmin,60px) 0;font-size:clamp(14px,2.4vmin,18px)}
 
 /* ======================================================================
+   The card for a night with no storyteller
+   The one screen in the lamp that admits something is wrong. It says the only
+   thing a five-year-old can act on - fetch a grown-up - and never the reason,
+   because the reason is a model that is not loaded, which is not a thing a
+   child can hold. And it waits: no timer takes it away, because the thing
+   that fixes it happens in another room and takes as long as it takes.
+   ====================================================================== */
+#trouble{position:fixed;inset:0;z-index:80;display:none;
+  align-items:center;justify-content:center;padding:clamp(18px,5vmin,48px);
+  background:radial-gradient(circle at 50% 44%, rgba(28,16,8,.88), rgba(8,5,3,.96) 72%)}
+#trouble.show{display:flex;animation:troubleIn 900ms var(--ease) both}
+@keyframes troubleIn{from{opacity:0}to{opacity:1}}
+#trouble .card{
+  max-width:86vw;text-align:center;border-radius:14px;
+  padding:clamp(24px,5vmin,44px) clamp(20px,4.5vmin,40px) clamp(20px,4vmin,36px);
+  background:radial-gradient(circle at 42% 16%, #fff8e8, var(--paper) 58%, var(--paper-deep));
+  box-shadow:0 18px 50px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.4)}
+/* The same printed ornament the missing-plate page wears, so the card reads as
+   part of the book rather than as a dialog that wandered in from a computer. */
+#trouble .orn{
+  width:42%;height:4px;margin:0 auto clamp(15px,3vmin,25px);
+  background-image:
+    radial-gradient(circle, var(--amber-deep) 0 2px, transparent 2.4px),
+    linear-gradient(90deg, transparent, rgba(150,96,40,.5) 22%, rgba(150,96,40,.5) 78%, transparent);
+  background-size:100% 100%, 100% 1px;
+  background-position:center, center; background-repeat:no-repeat; opacity:.75}
+/* The measure belongs to the line, not to the box: a width in ch has to be
+   read at the size the sentence is actually set in, or the card comes out the
+   width of a receipt. Two lines of about thirty characters is a card someone
+   reads at a glance from the doorway. */
+#troubleLine{
+  font-family:var(--serif);color:var(--ink);max-width:31ch;margin:0 auto;
+  font-size:clamp(16px,2.7vmin,23px);line-height:1.45;letter-spacing:.005em}
+/* One button, and it is the way out. Sized like the bar keys - a thumb, not a
+   pointer - because whoever ends up pressing it may well be five. */
+#troubleGo{
+  -webkit-appearance:none;appearance:none;border:0;cursor:pointer;
+  margin-top:clamp(18px,3.6vmin,30px);padding:.62em 1.6em;border-radius:999px;
+  font-family:var(--serif);font-size:clamp(15px,2.4vmin,20px);color:#fff4e0;
+  background:linear-gradient(180deg,#c6702a,#a4551d);
+  box-shadow:0 3px 0 rgba(90,46,14,.55), 0 8px 20px rgba(0,0,0,.35);
+  transition:transform 130ms var(--ease), box-shadow 130ms var(--ease)}
+#troubleGo:active{transform:translateY(3px);
+  box-shadow:0 1px 0 rgba(90,46,14,.55), 0 4px 12px rgba(0,0,0,.3)}
+/* The button takes focus on sight so Enter and Space reach it. The browser's
+   own ring for that is a blue rectangle, which is the single piece of
+   operating system that could ever appear in this room. Same ring, repainted
+   in the candle's colours. */
+#troubleGo:focus{outline:none}
+#troubleGo:focus-visible{outline:2px solid rgba(255,185,104,.85);outline-offset:3px}
+
+/* While the card is up there is nothing to pause and nothing to shelve, and a
+   key showing faintly through the scrim reads as a smudge on the glass. */
+body.troubled #bar{opacity:0;pointer-events:none}
+
+/* ======================================================================
    The workshop
    Forty seconds pass between the ask and the first page, and a candle that
    just sits there reads as broken. So the lantern shows its work: the beats
@@ -725,6 +796,14 @@ body[data-phase="thinking"] #workshop{display:block}
   <div id="shelfEmpty" hidden>No stories yet. Ask for one.</div>
 </div>
 
+<div id="trouble" role="alertdialog" aria-labelledby="troubleLine">
+  <div class="card">
+    <div class="orn" aria-hidden="true"></div>
+    <p id="troubleLine">The lantern needs a storyteller. Ask a grown-up to check the Tiiny.</p>
+    <button id="troubleGo" type="button">Try again</button>
+  </div>
+</div>
+
 <div id="echo"></div>
 <div id="notice"></div>
 <div id="dots"></div>
@@ -773,7 +852,9 @@ var S = {
   pending: null,                        // page waiting for both to finish
   timers:  [],                          // session-lifetime timers
   ptimers: [],                          // this-page-only timers
-  thinkT:  null                         // "no story ever arrived" clock
+  thinkT:  null,                        // "no story ever arrived" clock
+  lastAsk: '',                          // the wish, kept to hand back
+  troubleKey: null                      // the failure the card is already up for
 };
 
 /* Two timer pools, deliberately. The page clock (ptimers) is torn down every
@@ -850,6 +931,48 @@ function notice(line, ms){
   n.textContent = line;
   n.classList.add('on');
   later(function(){ n.classList.remove('on'); }, ms || 7000);
+}
+
+/* The two nights the lantern cannot start at all.
+   These are different in kind from every other failure: there is no
+   storyteller loaded on the device, or the device is not answering, and
+   nothing the child does fixes either. Goodnight would be a lie that ends the
+   evening while a grown-up could still start it, and a notice would fade out
+   before anyone walked in. So the card waits instead, in the lantern's own
+   words. The engine's sentence for a grown-up names models and belongs at
+   /parent; it is never rendered here, which is why `line` is ignored. */
+var TROUBLE = {
+  no_storyteller:     'The lantern needs a storyteller. Ask a grown-up to check the Tiiny.',
+  device_unreachable: 'The lantern cannot hear the Tiiny. Ask a grown-up to check it.'
+};
+
+function showTrouble(reason, storyId){
+  var line = TROUBLE[reason];
+  if (!line) return;
+  /* The poll fallback re-reads the same failed state every 2.5 seconds, and a
+     card that comes straight back cannot be dismissed. One key per failure
+     guards the repeat and the dismissal both: it is cleared by the next ask,
+     so the same trouble twice in one evening still shows twice. */
+  var key = reason + ':' + (storyId == null ? '' : storyId);
+  if (S.troubleKey === key) return;
+  S.troubleKey = key;
+  /* Put the candle and the prompt back underneath first, so dismissing the
+     card is only the card leaving. The wish stays in the field: if a grown-up
+     loads the model, Try again should not also mean ask again. */
+  var wish = S.lastAsk;
+  closeShelf();
+  resetToIdle();
+  if (wish) $('field').value = wish;
+  $('troubleLine').textContent = line;
+  $('trouble').classList.add('show');
+  body.classList.add('troubled');
+  try{ $('troubleGo').focus(); }catch(e){}
+}
+
+function dismissTrouble(){
+  $('trouble').classList.remove('show');
+  body.classList.remove('troubled');
+  if (!('ontouchstart' in window)) { try{ $('field').focus(); }catch(e){} }
 }
 
 /* ======================================================================
@@ -1005,7 +1128,7 @@ function dress(pg){
   drawDots(pg.idx);
 }
 
-/* Shrink one wrapper until its block fits its box. A bedtime page is 55–70
+/* Shrink one wrapper until its block fits its box. A bedtime page is 55-70
    words but the model will occasionally hand us 90, and a clipped last line
    is the one typographic failure a parent WILL notice. Cheap insurance:
    at most 40 one-pixel steps, run on a hidden layer before it fades in. */
@@ -1221,6 +1344,7 @@ function resetToIdle(){
   $('dots').classList.remove('on');    $('dots').innerHTML = '';
   $('echo').classList.remove('on');
   workshopReset();
+  body.classList.remove('troubled');
   $('invite').textContent = 'Tell me a story about…';
   $('field').value = '';
   setPhase('idle');
@@ -1309,6 +1433,13 @@ function handle(kind, data){
     if (kind === 'ping') return;
 
     if (kind === 'hello'){
+      // A state read carrying a trouble reason is a failure that happened
+      // while the event stream was down - the poll is the only way it reaches
+      // the lamp at all, so it is read before anything else here.
+      if (TROUBLE[data.reason]){
+        showTrouble(data.reason, data.story && data.story.story_id);
+        return;
+      }
       // `hello` arrives on EVERY SSE reconnect, and every 2.5s once the poll
       // fallback is running. It used to rebuild S.pages from scratch with brand
       // new page objects and then unconditionally show()+startNarration(),
@@ -1376,13 +1507,19 @@ function handle(kind, data){
       return;
     }
 
+    if (kind === 'trouble'){ showTrouble(data.reason, data.story_id); return; }
+
     if (kind === 'end'){
-      // The child pressed "a new story": we are already back at the candle and
-      // the stop we sent is what produced this frame. Do not re-run goodnight.
-      if (S.phase === 'idle') return;
       // Goodnight from a story that is already over and replaced.
       if (data.story_id != null && S.story && S.story.story_id != null &&
           data.story_id !== S.story.story_id) return;
+      // A story that never reached page one did not end, it never started, and
+      // that gets the card. Every other ending - finished, stopped, or a
+      // failure with pages already read - keeps the goodnight it always had.
+      if (TROUBLE[data.reason]){ showTrouble(data.reason, data.story_id); return; }
+      // The child pressed "a new story": we are already back at the candle and
+      // the stop we sent is what produced this frame. Do not re-run goodnight.
+      if (S.phase === 'idle') return;
       if (data.line) notice(data.line, 9000);
       if (S.current && !S.ended && data.reason === 'finished'){
         // Let the page in flight finish reading itself out.
@@ -1403,7 +1540,7 @@ function handle(kind, data){
    Transport: SSE, with a silent poll fallback if it keeps dying.
    ====================================================================== */
 var es = null, sseFails = 0, polling = null;
-var KINDS = ['hello','state','story','page','build','notice','end','ping'];
+var KINDS = ['hello','state','story','page','build','notice','end','trouble','ping'];
 
 function connect(){
   if (!window.EventSource){ startPolling(); return; }
@@ -1484,6 +1621,10 @@ $('ask').addEventListener('submit', function(e){
 
 function ask(text){
   setPhase('thinking');
+  // A new wish is a new night: the card that was up for the last one has to be
+  // allowed back if the same thing happens again.
+  S.lastAsk = text;
+  S.troubleKey = null;
   $('echo').textContent = text;
   $('echo').classList.add('on');
   try{ $('field').blur(); }catch(e){}
@@ -1546,7 +1687,11 @@ stirred();
    ?demo=1 - a fake story with canvas-painted plates, so the look can be
    reviewed with no device on the network. Never runs otherwise.
    ====================================================================== */
-var DEMO = /[?&]demo=1/.test(location.search);
+/* The value picks which demo: 1 is the fake story, a trouble reason is the
+   card. Any value at all means "no device on the network", so the page never
+   opens an event stream that nothing is going to answer. */
+var DEMO_MODE = (/[?&]demo=([^&]*)/.exec(location.search) || [])[1] || '';
+var DEMO = !!DEMO_MODE;
 function demoPlate(seed){
   try{
     var c = document.createElement('canvas'); c.width = c.height = 512;
@@ -1565,6 +1710,13 @@ function demoPlate(seed){
   }catch(e){ return null; }
 }
 function demoRun(text){
+  // The bad night, played through the same frame and the same handler the
+  // engine drives, so what is reviewed here is what a child would actually
+  // get rather than a mock-up of it.
+  if (TROUBLE[DEMO_MODE]){
+    later(function(){ handle('end', { story_id:1, reason:DEMO_MODE }); }, 1100);
+    void text; return;
+  }
   var title = 'Biscuit and the Dragon Who Kept the Lights On';
   // The spine too, so the demo previews the workshop the same way a real
   // story does - it is the only way to look at that screen without a device.
@@ -1704,6 +1856,7 @@ $('bNew').addEventListener('click', newStory);
 $('bShelf').addEventListener('click', function(){
   if ($('shelf').classList.contains('show')) closeShelf(); else openShelf();
 });
+$('troubleGo').addEventListener('click', dismissTrouble);
 $('shelfBack').addEventListener('click', closeShelf);
 // The list fills the whole overlay, so a tap on the empty space below the
 // books lands on the list, not the backdrop. Both have to close it.
@@ -1724,7 +1877,9 @@ setPhase('idle');
 if (!DEMO) connect();
 // ?demo=1&go runs the fake story without a hand on the keyboard, which is how
 // the page turn and the workshop get reviewed on a machine with no device.
-if (DEMO && /[?&]go\b/.test(location.search)) setTimeout(function(){ ask('a dragon who is scared of the dark'); }, 400);
+// A trouble demo needs no &go: the card is the whole of what it shows.
+if (DEMO && (TROUBLE[DEMO_MODE] || /[?&]go\b/.test(location.search)))
+  setTimeout(function(){ ask('a dragon who is scared of the dark'); }, 400);
 // Focus the field on a desktop only; on a tablet this would raise the
 // on-screen keyboard over the candle, which is exactly wrong at bedtime.
 if (!('ontouchstart' in window)) { try{ $('field').focus(); }catch(e){} }
