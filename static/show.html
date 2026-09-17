@@ -1614,8 +1614,12 @@ function jpost(url, obj, cb){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(obj),
     signal: ctl ? ctl.signal : undefined
-  }).then(function(r){ clearTimeout(kill); cb(r.ok); })
-    .catch(function(){ clearTimeout(kill); cb(false); });
+  }).then(function(r){
+    clearTimeout(kill);
+    // The reply rides along with ok, because a refusal names its reason in
+    // the body and the caller has to tell that apart from a plain hiccup.
+    return r.json().catch(function(){ return null; }).then(function(reply){ cb(r.ok, reply); });
+  }).catch(function(){ clearTimeout(kill); cb(false, null); });
 }
 
 /* Reading progress. The engine prefetches exactly one page ahead and waits for
@@ -1651,13 +1655,17 @@ function ask(text){
   $('echo').classList.add('on');
   try{ $('field').blur(); }catch(e){}
   if (DEMO){ demoRun(text); return; }
-  jpost('/api/request', { text:text }, function(ok){
+  jpost('/api/request', { text:text }, function(ok, reply){
     if (!ok){
-      // The device is busy or the server hiccuped. This is the one place a
-      // child sees "no" and it is phrased as the lantern, not as an error.
-      notice('the lantern is dreaming, ask me again in a moment', 8000);
       setPhase('idle');
       $('field').value = text;
+      // A refusal that names its reason has already put its own card up over
+      // the prompt, and "ask me again in a moment" is the wrong advice for it:
+      // waiting does not produce a storyteller. Only a plain hiccup gets the
+      // dreaming line, which is the one place a child sees "no" and it is
+      // phrased as the lantern, not as an error.
+      if (reply && reply.reason) return;
+      notice('the lantern is dreaming, ask me again in a moment', 8000);
     }
   });
 }
