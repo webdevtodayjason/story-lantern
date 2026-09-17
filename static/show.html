@@ -42,15 +42,18 @@
     notice  {line:"..."}   a soft, human line. NOT an error. e.g.
               "the lantern is dreaming, try again in a moment"
     end     {reason:"finished"|"stopped"|"failed"
-             |"no_storyteller"|"device_unreachable", line?:"..."}
-              The last two mean the story never began - no storyteller on the
-              device, or no device answering. They do NOT say goodnight: they
-              raise a calm card that waits for a grown-up, and they ignore
-              `line`, so a sentence written for a parent cannot reach a child
-              even if the server sends one.
-    trouble {reason:"no_storyteller"|"device_unreachable"}
-              Optional alias for those two, for a server that would rather name
-              the frame than overload the ending. Same card either way.
+             |"no_storyteller"|"device_unreachable",
+             started?:bool, line?:"..."}
+              started:false means the story never began - no storyteller on the
+              device, no device answering, or a plan that fell over before page
+              one. Those do NOT say goodnight: they raise a calm card that waits
+              for a grown-up, and they ignore `line`, so a sentence written for a
+              parent cannot reach a child even if the server sends one. The flag
+              and not the reason decides it, because "failed" happens on both
+              sides of the first page and only one of them is an ending.
+    trouble {reason:"no_storyteller"|"device_unreachable"|"failed"}
+              Optional alias for those, for a server that would rather name the
+              frame than overload the ending. Same card either way.
     ping    {}             heartbeat, ignored.
 
   Field aliases accepted, so a small naming drift in the server can't break the
@@ -68,13 +71,14 @@
     breathes, optional ambience loops. No spinner, ever, at any point.
   * SSE drops                   -> EventSource reconnects silently; after
     repeated failures we quietly poll /api/state.
-  * no storyteller / no device  -> the one failure that is NOT degradable: the
-    lantern cannot begin at all. A card asks for a grown-up and waits there.
+  * a story that never started -> the one failure that is NOT degradable: no
+    storyteller, no device answering, or a plan that fell over before page one.
+    A card asks for a grown-up and waits there.
 
   ?demo=1 renders a fake three-page story with canvas-painted plates so the
-  visuals can be reviewed with no device attached. ?demo=no_storyteller and
-  ?demo=device_unreachable play the bad night the same way, so the card can be
-  looked at without arranging a real failure.
+  visuals can be reviewed with no device attached. ?demo=no_storyteller,
+  ?demo=device_unreachable and ?demo=failed play the bad nights the same way, so
+  each card can be looked at without arranging a real failure.
 ==========================================================================
 -->
 <style>
@@ -933,21 +937,30 @@ function notice(line, ms){
   later(function(){ n.classList.remove('on'); }, ms || 7000);
 }
 
-/* The two nights the lantern cannot start at all.
+/* The nights the lantern cannot start at all.
    These are different in kind from every other failure: there is no
-   storyteller loaded on the device, or the device is not answering, and
-   nothing the child does fixes either. Goodnight would be a lie that ends the
-   evening while a grown-up could still start it, and a notice would fade out
-   before anyone walked in. So the card waits instead, in the lantern's own
-   words. The engine's sentence for a grown-up names models and belongs at
-   /parent; it is never rendered here, which is why `line` is ignored. */
+   storyteller loaded on the device, or the device is not answering, or the
+   story fell over before its first page - and nothing the child does fixes
+   any of them. Goodnight would be a lie that ends the evening while a grown-up
+   could still start it, and a notice would fade out before anyone walked in.
+   So the card waits instead, in the lantern's own words. The engine's sentence
+   for a grown-up names models and belongs at /parent; it is never rendered
+   here, which is why `line` is ignored.
+
+   The third line is deliberately vaguer than the other two. It is the one for
+   a failure the lamp cannot name, and telling a grown-up to go load a model on
+   a night when the models were fine sends them after the wrong thing. */
 var TROUBLE = {
   no_storyteller:     'The lantern needs a storyteller. Ask a grown-up to check the Tiiny.',
-  device_unreachable: 'The lantern cannot hear the Tiiny. Ask a grown-up to check it.'
+  device_unreachable: 'The lantern cannot hear the Tiiny. Ask a grown-up to check it.',
+  failed:             'The lantern could not start the story. Ask a grown-up to check the Tiiny.'
 };
 
 function showTrouble(reason, storyId){
-  var line = TROUBLE[reason];
+  /* An unknown reason still gets a card. A story that never started must never
+     fall through to a goodnight just because the server named its trouble
+     something this page has not heard of. */
+  var line = TROUBLE[reason] || TROUBLE.failed;
   if (!line) return;
   /* The poll fallback re-reads the same failed state every 2.5 seconds, and a
      card that comes straight back cannot be dismissed. One key per failure
@@ -955,6 +968,11 @@ function showTrouble(reason, storyId){
      so the same trouble twice in one evening still shows twice. */
   var key = reason + ':' + (storyId == null ? '' : storyId);
   if (S.troubleKey === key) return;
+  /* A state read names no story where an end frame does, so the same failure
+     keys two ways and a card someone had dismissed could come back once on the
+     next reconnect. An id-less frame adopts the key already up. */
+  if (storyId == null && S.troubleKey &&
+      S.troubleKey.indexOf(reason + ':') === 0) return;
   S.troubleKey = key;
   /* Put the candle and the prompt back underneath first, so dismissing the
      card is only the card leaving. The wish stays in the field: if a grown-up
@@ -1516,7 +1534,11 @@ function handle(kind, data){
       // A story that never reached page one did not end, it never started, and
       // that gets the card. Every other ending - finished, stopped, or a
       // failure with pages already read - keeps the goodnight it always had.
-      if (TROUBLE[data.reason]){ showTrouble(data.reason, data.story_id); return; }
+      // The flag decides it, not the reason: "failed" is sent for a plan that
+      // died before page one and for a story that ran out at page five, and
+      // reading the reason alone answered a story that never began with
+      // "Goodnight." - the 22:48 symptom, arriving through a second door.
+      if (data.started === false){ showTrouble(data.reason, data.story_id); return; }
       // The child pressed "a new story": we are already back at the candle and
       // the stop we sent is what produced this frame. Do not re-run goodnight.
       if (S.phase === 'idle') return;
@@ -1714,7 +1736,9 @@ function demoRun(text){
   // engine drives, so what is reviewed here is what a child would actually
   // get rather than a mock-up of it.
   if (TROUBLE[DEMO_MODE]){
-    later(function(){ handle('end', { story_id:1, reason:DEMO_MODE }); }, 1100);
+    later(function(){
+      handle('end', { story_id:1, reason:DEMO_MODE, started:false });
+    }, 1100);
     void text; return;
   }
   var title = 'Biscuit and the Dragon Who Kept the Lights On';

@@ -123,6 +123,19 @@ NOT_A_STORYTELLER = ("coder", "embed", "rerank", "ocr", "asr", "whisper",
 NO_STORYTELLER_LINE = ("The lantern needs a storyteller. "
                        "Ask a grown-up to check the Tiiny.")
 
+# The other two ways a story can die before it starts, in the same register. One
+# line per reason, because the storyteller line was going out for all three: on a
+# night when the models were fine and the plan call fell over, a grown-up was
+# being sent to load a model that was already loaded. A wrong diagnosis said
+# calmly is still a wrong diagnosis.
+CHILD_TROUBLE_LINE = {
+    "no_storyteller": NO_STORYTELLER_LINE,
+    "device_unreachable": ("The lantern cannot hear the Tiiny. "
+                           "Ask a grown-up to check it."),
+    "failed": ("The lantern could not start the story. "
+               "Ask a grown-up to check the Tiiny."),
+}
+
 # Reading a model list is a cheap GET, not an inference, so it gets a short HTTP
 # timeout. The deadline it is waited on varies with who is waiting: see
 # running_models and StorySession.choose_storyteller.
@@ -450,6 +463,12 @@ class DeviceWorker(threading.Thread):
         self._seq = itertools.count()
         self._stop = threading.Event()
         self.busy_since: float | None = None   # set while riding out 150004
+        # Set when a call gives up without reaching the device at all, cleared
+        # by the next answer of any kind. It is the only place in the process
+        # that knows the difference between a Tiiny that is thinking and a Tiiny
+        # that is off, and a caller who gave up waiting cannot tell them apart
+        # from its own exception. See failure_reason.
+        self.unreachable_since: float | None = None
         self.current: str = "idle"
         self.calls = 0
         self.busy_hits = 0
@@ -567,6 +586,7 @@ class DeviceWorker(threading.Thread):
         while True:
             try:
                 out = self._http(job)
+                self.unreachable_since = None   # it answered, so it is there
                 if self.busy_since is not None:
                     self.busy_since = None
                     self.bus.publish("device.ok", {})
@@ -579,7 +599,16 @@ class DeviceWorker(threading.Thread):
                 # unlike 150004 it is not a queue we are waiting our turn in.
                 transient += 1
                 if transient >= TRANSIENT_RETRIES or self._stop.is_set():
-                    raise DeviceError(str(exc)) from None
+                    if self.unreachable_since is None:
+                        self.unreachable_since = time.time()
+                    # Re-raised as ITSELF. It used to be flattened into a plain
+                    # DeviceError here, which threw away the one bit that says
+                    # nothing answered at all - so a Tiiny that was off, or off
+                    # the LAN, reported the same reason as a model that replied
+                    # with a refusal, and the screen written for an absent device
+                    # could never be reached by an absent device. DeviceUnreachable
+                    # IS a DeviceError, so every caller that degrades still does.
+                    raise
                 log(f"{job.label}: {exc} (transient, retry {transient})")
                 self._sleep(1.0 * transient)
             except DeviceBusy:
@@ -628,6 +657,10 @@ class DeviceWorker(threading.Thread):
                 raw = resp.read()
                 ctype = resp.headers.get("Content-Type", "")
         except urllib.error.HTTPError as exc:
+            # A refusal is an answer. Holding "we cannot reach it" over a device
+            # that just said 404 would put the wrong sentence on the next
+            # failure, which is the whole thing this flag exists to get right.
+            self.unreachable_since = None
             body = b""
             try:
                 body = exc.read()
@@ -964,16 +997,30 @@ def no_storyteller_sentence(running, usage: int | None = None,
     return line
 
 
-def failure_reason(exc: Exception) -> str:
+def failure_reason(exc: Exception, worker: "DeviceWorker | None" = None) -> str:
     """One word for what went wrong, for the lamp and the story record.
 
     Three outcomes, because they need three different answers: load a model,
     check the device, or nothing the parent can do from here.
+
+    The worker is the tiebreak, and it is not optional dressing. A Tiiny that is
+    off does not refuse a connection, it swallows it - so every call sits there
+    until whoever is waiting gives up, and what the story sees is a plain
+    timeout that says nothing about why. The worker is the only thing that knows
+    it never reached the device at all. Measured on a dead host: without this,
+    the most ordinary form of "the Tiiny is unplugged" reported itself as
+    "something went wrong", which is the sentence that helps a parent least.
     """
     if isinstance(exc, NoStoryteller):
         return "no_storyteller"
-    if isinstance(exc, (DeviceUnreachable, LanternBusy)):
+    if isinstance(exc, DeviceUnreachable):
         return "device_unreachable"
+    if worker is not None and worker.unreachable_since is not None:
+        return "device_unreachable"
+    # LanternBusy used to land here too, and it is the one thing that must not:
+    # a device that answered and said it was busy is the lantern dreaming, not a
+    # device nobody can hear. Telling a parent to go check a Tiiny that is
+    # sitting there working sends them looking for a fault that is not there.
     return "failed"
 
 
@@ -1395,6 +1442,13 @@ def chat_json(worker: "DeviceWorker", messages, *, lane, max_tokens, temperature
         except Exception as exc:       # noqa: BLE001 - DeviceError, parse failure
             last = exc
             log(f"{label}: attempt (nothink={nothink}) failed: {exc}")
+    # A device nobody can hear stays a device nobody can hear. Wrapping it in a
+    # plain DeviceError here is the same mistake the retry budget used to make:
+    # the parent log then reads "something went wrong" for a Tiiny that was
+    # unplugged halfway through page three, which sends a grown-up hunting the
+    # wrong fault.
+    if isinstance(last, DeviceUnreachable):
+        raise DeviceUnreachable(f"{label}: {last}")
     raise DeviceError(f"{label}: {last}")
 
 
@@ -1600,6 +1654,11 @@ class StorySession:
         self.storyteller: str | None = None
         self.start_preferred = False       # nobody home, but MODEL_TEXT would fit
         self.failure_reason: str | None = None
+        # Which side of the first page it died on. "failed" means two different
+        # nights - a plan that never happened, and a story that ran out at page
+        # five - and the lamp owes those two different answers, so the reason
+        # alone is not enough to tell them apart.
+        self.failed_before_pages = False
 
         self.reading_idx = -1              # highest page the child has started
         self._cv = threading.Condition()
@@ -1716,7 +1775,7 @@ class StorySession:
                 self.fail_before_pages(exc)
                 return
             self._set_status("failed")
-            self.failure_reason = failure_reason(exc)
+            self.failure_reason = failure_reason(exc, self.worker)
             self._merge_theme(reason=self.failure_reason, parent_line=str(exc)[:300])
             # A story that broke at page five DID happen, so the child hears a
             # goodnight, not an error. The parent log has the exception; the lamp
@@ -2471,18 +2530,25 @@ class StorySession:
         The sentence never rides the event bus. It names models, and the lamp is
         the one screen in this product that must never show a model id.
         """
-        reason = failure_reason(exc)
+        reason = failure_reason(exc, self.worker)
         self.failure_reason = reason
+        self.failed_before_pages = True
         self._set_status("failed")
         line = exc.sentence if isinstance(exc, NoStoryteller) else str(exc)[:300]
         self._merge_theme(reason=reason, parent_line=line,
                           storyteller=self.storyteller)
         if self.stop_event.is_set():
             return reason              # superseded; the child moved on already
+        # started=False is what makes this frame different from a goodnight, and
+        # it is the server's to say: only this side knows whether the story died
+        # before page one or after page five, and the lamp has to answer those
+        # two differently without being told the reason twice.
         self.bus.publish("story.failed",
                          {"story_id": self.story_id, "reason": reason},
                          ui=("end", {"story_id": self.story_id, "reason": reason,
-                                     "line": NO_STORYTELLER_LINE}))
+                                     "started": False,
+                                     "line": CHILD_TROUBLE_LINE.get(
+                                         reason, CHILD_TROUBLE_LINE["failed"])}))
         return reason
 
     def _time(self, label: str, t0: float) -> None:
@@ -2843,10 +2909,14 @@ class Lantern:
         if not s or s.status in ("stopped", "failed"):
             # A story that failed before page one leaves its reason here, so a
             # lamp that reconnects (or falls back to polling) can still put the
-            # calm card up instead of a candle that looks fine.
+            # calm card up instead of a candle that looks fine. Only that kind:
+            # a story that broke at page five already said its goodnight, and
+            # answering the next reconnect with a card would reopen an evening
+            # that was finished.
             return {"state": "idle", "story": None, "pages": [],
-                    "storyteller": getattr(s, "storyteller", None) if s else None,
-                    "reason": getattr(s, "failure_reason", None) if s else None}
+                    "reason": (getattr(s, "failure_reason", None)
+                               if s and getattr(s, "failed_before_pages", False)
+                               else None)}
         state = {"planning": "thinking", "telling": "telling",
                  "finished": "ending"}.get(s.status, "idle")
         # current_idx is the page the child is READING, not the newest page we
@@ -2867,7 +2937,11 @@ class Lantern:
                       "page_count": s.page_count},
             "current_idx": current_idx,
             "pages": [s._ui_page(p) for _, p in items],
-            "storyteller": getattr(s, "storyteller", None),
+            # No storyteller here, on purpose. This body is the SSE hello and
+            # the lamp's poll fallback, so anything in it is pushed to a child's
+            # screen every 2.5 seconds - and the lamp is the one screen in this
+            # product that must never carry a model id. /api/story/<id> and the
+            # parent page are where who-told-it belongs.
             "reason": getattr(s, "failure_reason", None),
         }
 

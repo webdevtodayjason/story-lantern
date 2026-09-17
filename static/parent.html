@@ -78,6 +78,15 @@
                 color:var(--muted); display:block; margin-bottom:.2rem; }
   .asked q { font-size:1.02rem; font-style:italic; }
   .asked .also { font-size:.84rem; color:var(--muted); margin-top:.35rem; }
+  .story .teller { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* A story that never got told, or stopped early. It reads in the block
+     colours because it is the one thing on a story card a parent may have to
+     act on, and it carries the engine's own sentence unedited. */
+  .refused { margin:.9rem 0 0; padding:.7rem .85rem; border-radius:.4rem;
+             border:1px solid var(--block); background:var(--block-bg); }
+  .refused .lbl { font-size:.7rem; letter-spacing:.07em; text-transform:uppercase;
+                  color:var(--block); font-weight:600; display:block; }
+  .refused p { margin:.3rem 0 0; font-size:.94rem; }
 
   .badge { display:inline-block; font-size:.68rem; letter-spacing:.05em; font-weight:600;
            text-transform:uppercase; padding:.16rem .45rem; border-radius:.28rem;
@@ -274,6 +283,30 @@ function renderEvents(events) {
     </details>`;
 }
 
+// Who told it, on every story. A parent reading a story that came out flat, or
+// short, or worded oddly is owed the name of the thing that wrote it: that is
+// the difference between "the lantern is broken" and "the small model was up
+// tonight". The lamp must never show a model id, so this page is the only place
+// it can appear.
+function toldBy(s) {
+  if (!s.storyteller) return "";
+  return ` · told by <span class="teller">${esc(s.storyteller)}</span>`;
+}
+
+// And a story that came out wrong says so in full, here. The child got a calm
+// card that names nothing on purpose; this is the other half of that bargain.
+// Without it, the two people who hit the 0.1.2 bug had nowhere at all to look -
+// the screen built to explain a bad night rendered nothing about it.
+function renderTrouble(s) {
+  if (!s.reason && !s.parent_line) return "";
+  const head = (s.pages && s.pages.length)
+    ? "This story stopped early" : "This story was never told";
+  return `<div class="refused">
+      <span class="lbl">${esc(head)}${s.reason ? " · " + esc(s.reason) : ""}</span>
+      <p>${esc(s.parent_line || "No reason was recorded.")}</p>
+    </div>`;
+}
+
 function renderStory(s) {
   const pages = (s.pages || []).slice().sort((a, b) => (a.idx || 0) - (b.idx || 0));
   const asked = s.raw_transcript || s.request || "";
@@ -281,11 +314,15 @@ function renderStory(s) {
   const extras = [];
   if (corrected && corrected !== asked) extras.push("heard as: " + esc(corrected));
   if (s.redirect_note) extras.push("the lantern said: " + esc(s.redirect_note));
-  if (s.status && s.status !== "finished") extras.push("status: " + esc(s.status));
+  // A failed story says what happened in its own block just below, in the
+  // engine's words, so "status: failed" here would only be the same news twice.
+  if (s.status && s.status !== "finished" && !s.reason)
+    extras.push("status: " + esc(s.status));
 
   return `<article class="story" data-id="${esc(s.id)}">
       <h2>${esc(s.title || "Untitled story")}</h2>
-      <div class="when">${esc(fmtDate(s.created_at))} · ${esc(pages.length)} page${pages.length === 1 ? "" : "s"}</div>
+      <div class="when">${esc(fmtDate(s.created_at))} · ${esc(pages.length)} page${pages.length === 1 ? "" : "s"}${toldBy(s)}</div>
+      ${renderTrouble(s)}
       <div class="asked">
         <span class="lbl">What ${esc(s.child_name || "your child")} asked for</span>
         <q>${esc(asked) || "<em>nothing was recorded</em>"}</q>
@@ -377,6 +414,14 @@ function normStory(s, childName) {
     raw_transcript: s.raw_transcript || s.request || "",
     corrected_transcript: s.corrected_transcript || "",
     redirect_note: s.redirect_note || theme.redirect_note || null,
+    // The three fields the lamp is never allowed to show, which is exactly why
+    // this page has to. Who told the story, and - for one that came out wrong -
+    // the one word for what happened and the sentence a grown-up can act on.
+    // They were being dropped here, in a whitelist that predates them, so the
+    // screen built to diagnose a bad night rendered nothing about it at all.
+    storyteller: s.storyteller || theme.storyteller || null,
+    reason: s.reason || theme.reason || null,
+    parent_line: s.parent_line || theme.parent_line || "",
     pages,
     page_count: s.page_count,
     safety_events: s.safety_events || [],
@@ -444,7 +489,8 @@ async function load() {
       <p>The aggregate endpoint, if you add one, should return
         <code>{generated_at, child:{name,age}, charter_version, storage:{media_mb,pruned_stories},
         stories:[{id, created_at, title, status, raw_transcript, corrected_transcript,
-        redirect_note, pages:[{idx, text, image_url, audio_url, safety_verdict,
+        redirect_note, storyteller, reason, parent_line,
+        pages:[{idx, text, image_url, audio_url, safety_verdict,
         safety_reason, regen_count, gen_ms}], safety_events:[{at, stage, page_idx,
         verdict, reason, offending_text}]}]}</code>
         and deletion at <code>POST ${API.replace("/data", "")}/story/&lt;id&gt;/delete</code>.</p>

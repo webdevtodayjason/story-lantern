@@ -41,6 +41,16 @@ bus = L.EventBus()
 w = L.DeviceWorker(L.CFG, bus)
 w.start()
 L.db_init()
+# The classifier runs on whatever chat model the device is holding, exactly as a
+# story does. Leaving this off sent every case to the hard-coded preferred model
+# and this file reported seven failures for a safety layer that was fine - the
+# same 404 the release exists to fix, in the test that measures the fix.
+JUDGE = L.pick_storyteller(w)
+if not JUDGE:
+    print("No chat model is loaded on the device. Load one and run this again.")
+    w.stop()
+    sys.exit(1)
+print("judged by:", JUDGE, "\n")
 fails = 0
 for label, text, want in CASES:
     t0 = time.time()
@@ -49,7 +59,7 @@ for label, text, want in CASES:
             w, [{"role": "system", "content": L.SAFETY_SYSTEM.format(age=5)},
                 {"role": "user", "content": text}],
             lane=L.LANE_LIVE, max_tokens=L.MIN_MAX_TOKENS, temperature=0.0,
-            label="judgetest", timeout=300.0)
+            label="judgetest", timeout=300.0, model=JUDGE)
         v = str(data.get("verdict") or "?").strip().upper()
         r = str(data.get("reason") or "")[:70]
     except Exception as exc:

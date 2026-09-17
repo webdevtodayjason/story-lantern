@@ -110,6 +110,12 @@ case-insensitively (the vendor renamed one of them by a single capital letter), 
 that has nobody to tell it fails before any page work with a calm card on the lamp and an
 actionable sentence for the parent instead of a goodnight for a story that never started.
 
+That last part goes for every way a story can die before its first page, not just a missing
+storyteller: a Tiiny nobody can hear now says so in those words, and a plan that falls over
+on a healthy device raises a card too rather than sending a grown-up off to load a model
+that was never the problem. The parent page is where the diagnosis lives - it names who told
+each story, and for one that was never told, what the device was holding and what to load.
+
 ---
 
 ## Install
@@ -235,6 +241,11 @@ again. The parent page carries the exact sentence, including what the device was
 instead. Before 0.1.3 this failed as a story that ended immediately, which is how it stayed
 undiagnosed.
 
+**The lamp says it cannot hear the Tiiny.** The device is off, unplugged, or on a different
+network than the lantern. Nothing on the lantern side fixes that one. There is a third card,
+"could not start the story", for everything else that goes wrong before page one; the parent
+page carries the exception for those.
+
 **The image model refuses to start.** Something else on the device is holding NPU budget.
 `curl localhost:8420/api/models` lists what is running; unload whatever you do not need.
 
@@ -266,7 +277,7 @@ you want to drive it from a button, a cron job or your own front end.
 | `POST /api/request` `{"text": "..."}` | ask for a story |
 | `POST /api/stop` | end the current story and return to the candle |
 | `GET /api/stories` | the shelf: every story with its page count and cover |
-| `GET /api/story/{id}` | one story, with pages and safety verdicts |
+| `GET /api/story/{id}` | one story, with pages, safety verdicts, who told it and why it failed |
 | `POST /api/story/{id}/replay` | play a saved story again, with no device calls |
 | `POST /api/progress` | the display telling the engine which page is being read |
 | `GET /api/models` | what is loaded on the device right now |

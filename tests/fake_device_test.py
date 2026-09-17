@@ -314,7 +314,8 @@ for name in ("state", "story", "page", "end"):
     check(f"UI event '{name}' emitted", name in seen, seen[:20])
 st2 = get("/api/state")
 check("/api/state shape",
-      set(st2) == {"state", "story", "pages", "storyteller", "reason"}, list(st2))
+      set(st2) == {"state", "story", "pages", "reason"}, list(st2))
+check("/api/state names no model", "storyteller" not in st2, list(st2))
 check("idle /api/state carries no failure", st2["reason"] is None, st2["reason"])
 req = urllib.request.Request("http://127.0.0.1:8499/api/request",
                              data=json.dumps({"text": "a story about a slow snail"}).encode(),
