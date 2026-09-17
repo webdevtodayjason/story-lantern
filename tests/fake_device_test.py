@@ -9,8 +9,12 @@ ever overlap, which is the invariant the whole design rests on.
 Exercises: the plan call, the empty-content/reasoning-scavenge path, 150004
 backoff, per-page build, safety SOFTEN + one regeneration then fallback,
 prefetch gating, every HTTP route, SSE, media serving, graceful degradation
-when the illustrator is evicted, and the character bible staying frozen across
-two stories (including a fuzzy-matched misspelling).
+when the illustrator is evicted or the voice is gone, and the character bible
+staying frozen across two stories (including a fuzzy-matched misspelling).
+
+The storyteller choice has its own file, tests/storyteller_test.py. What this one
+holds it to is that a story told by a model chosen at run time still comes out
+the same, on every route.
 """
 import json, os, shutil, sys, tempfile, threading, time, urllib.error, urllib.request
 
@@ -27,6 +31,7 @@ os.environ.pop("TIINY_HOST", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import lantern as L  # noqa: E402
+from fake_models import FakeModels, CHAT, EMBED, TTS  # noqa: E402
 
 # Pin the device outright: nothing in this harness may touch a network, and that
 # includes the gateway port probe.
@@ -36,6 +41,11 @@ L.device.set_current(L.device.Device(
 
 PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
 MP3 = (b"\xff\xfb\x90\x00" + b"\x00" * 64)
+
+# One chat model and an embedder, which is what a real device looks like at
+# bedtime once something else has the budget. The lantern has to find the chat
+# model on its own; Ornith is not here and is not required.
+MODELS = FakeModels(running=[CHAT, EMBED], npu_available=16)
 
 calls = {"n": 0, "busy": 0, "concurrent": 0}
 inflight = threading.Semaphore(1)
@@ -58,7 +68,11 @@ def fake_http(self, job):
         if job.kind == "speech":
             return MP3
         if job.kind == "control":
-            return {"ok": True}
+            # Routed by path, not waved through. A control call that answers
+            # {"ok": true} to everything tells the lantern the device is holding
+            # no models at all, which is a different test than the one intended.
+            answer = MODELS.control(job.path)
+            return {"ok": True} if answer is None else answer
         body = job.body
         text = json.dumps(body["messages"])
         if "spine" in text and "first_page" in text:
@@ -175,9 +189,13 @@ check("page 2 softened + regenerated", s.pages[1].verdict == "SOFTENED", s.pages
 check("regen counted", s.pages[1].regen == 1)
 check("every page has audio", all(p.audio_path for p in s.pages.values()))
 check("every page has image", all(p.image_path for p in s.pages.values()))
+check("storyteller chosen from what was running", s.storyteller == CHAT, s.storyteller)
+check("the voice model was started, not assumed", TTS in MODELS.starts, MODELS.starts)
 
 doc = get(f"/api/story/{sid}")
 check("api story pages", len(doc["pages"]) == 3, len(doc["pages"]))
+check("story json names its storyteller", doc["storyteller"] == CHAT, doc["storyteller"])
+check("a finished story has no failure reason", doc["reason"] is None, doc["reason"])
 check("api safety events recorded", len(doc["safety_events"]) >= 1, doc["safety_events"])
 check("image prompt carries frozen descriptor",
       "one folded left ear" in doc["pages"][0]["image_prompt"], doc["pages"][0]["image_prompt"][:120])
@@ -257,6 +275,30 @@ check("story still finishes with no illustrator", s3.status == "finished", s3.st
 check("pages still narrated", all(p.audio_path for p in s3.pages.values()))
 check("degraded event emitted", "page.degraded" in seen)
 
+print("\n== degradation: the voice is gone ==")
+
+
+def fake_http4(self, job):
+    # The voice model evicted mid-story. The design says the words stay on
+    # screen and a parent reads them; it does NOT say the story ends.
+    if job.kind == "speech":
+        raise L.DeviceError("HTTP 404 model_not_found")
+    return fake_http2(self, job)
+
+
+L.DeviceWorker._http = fake_http4
+post("/api/story", {"request": "a story about a quiet moth", "pages": 2})
+s5 = lan.session
+deadline = time.time() + 60
+while s5.thread.is_alive() and time.time() < deadline:
+    time.sleep(0.1)
+check("story still finishes with no voice", s5.status == "finished", s5.status)
+check("pages still have words", all(p.text for p in s5.pages.values()))
+check("pages still have plates", all(p.image_path for p in s5.pages.values()))
+check("no page was narrated", not any(p.audio_path for p in s5.pages.values()))
+check("silent pages still reached the lamp",
+      len(get("/api/state")["pages"]) == len(s5.pages), get("/api/state"))
+
 print("\n== stop mid-story ==")
 L.DeviceWorker._http = fake_http2
 r4 = post("/api/story", {"request": "a long slow story", "pages": 8})
@@ -271,7 +313,9 @@ check("hello sent on connect", "hello" in seen, seen[:5])
 for name in ("state", "story", "page", "end"):
     check(f"UI event '{name}' emitted", name in seen, seen[:20])
 st2 = get("/api/state")
-check("/api/state shape", set(st2) == {"state", "story", "pages"}, list(st2))
+check("/api/state shape",
+      set(st2) == {"state", "story", "pages", "storyteller", "reason"}, list(st2))
+check("idle /api/state carries no failure", st2["reason"] is None, st2["reason"])
 req = urllib.request.Request("http://127.0.0.1:8499/api/request",
                              data=json.dumps({"text": "a story about a slow snail"}).encode(),
                              method="POST", headers={"Content-Type": "application/json"})
@@ -320,6 +364,9 @@ for k in ("child", "stories"):
     check(f"/api/parent/data has {k}", k in pd, list(pd))
 check("parent data carries stories with pages",
       bool(pd["stories"]) and "pages" in pd["stories"][0], list(pd["stories"][:1]))
+told = [s for s in pd["stories"] if s.get("storyteller")]
+check("parent log says who told the story", bool(told),
+      [(s["id"], s.get("storyteller")) for s in pd["stories"][:3]])
 verbatim = [e for s in pd["stories"] for e in s.get("safety_events", [])
             if e.get("offending_text")] if "stories" in pd else []
 check("parent log keeps offending text verbatim", bool(verbatim), verbatim[:1])

@@ -17,7 +17,7 @@ API, and nothing about your child leaves the house.
 
 | | |
 |---|---|
-| **Writes** the story | Ornith-1.0-35B, page by page, ~60 words a page |
+| **Writes** the story | whichever chat model your Tiiny is holding, page by page, ~60 words a page |
 | **Paints** every page | Z-Image-Turbo, 512×512, 8 diffusion steps, ~8s |
 | **Reads** it aloud | Qwen3-TTS CustomVoice - a warm, unhurried voice |
 | **Remembers** characters | a character bible: a fixed descriptive phrase plus a fixed image seed, replayed verbatim into every later illustration |
@@ -68,14 +68,19 @@ percentages, no stack traces anywhere in the display.
   step (verified on 3.9.6 and 3.13)
 - A browser for the display. Kiosk mode on a small landscape screen makes it a lamp
 
-## The three models
+## What it needs loaded
 
-Load these two in TiinyOS **before** you start the lantern. Nothing else needs to be
-running, and the lantern will not load them for you:
+**A chat model loaded, Ornith preferred.** Any of them will do. The lantern asks the device
+what it is holding when a story starts and picks the best storyteller in the list -
+Ornith-1.0-35B first because the prompts and the safety rubric were written against it,
+then Qwen3.8, Qwen3.6, Qwen3-30B, Qwen3.5, gpt-oss, GLM, then anything else that can hold a
+conversation. It skips the coder, embedding, reranker, OCR, ASR, voice and image models,
+because none of them can tell a bedtime story. Whichever one it picks tells the whole story:
+the plan, every page, and every safety check.
 
 | Model | Does | NPU |
 |---|---|---|
-| `deepreinforce-ai/Ornith-1.0-35B` | writes the story, and checks it | 50u |
+| a chat model, e.g. `deepreinforce-ai/Ornith-1.0-35B` | writes the story, and checks it | 50u for a 35B |
 | `Tongyi-MAI/Z-Image-Turbo` | paints each page | 32u |
 
 The third, `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` (7u), is the voice. The lantern starts it
@@ -83,9 +88,27 @@ when a story begins and releases it after twenty minutes idle, so it is not hold
 between bedtimes. Set `manage_tts: false` in `config.json` if you would rather load it
 yourself and leave it up.
 
-That is 89 of the device's 100 units with the voice in. If something else is holding
-budget, unload it first or the image model will refuse to start. Check what is up with
-`curl localhost:8420/api/models` once the lantern is running.
+That is 89 of the device's 100 units with a 35B and the voice in. The lantern loads the
+voice and nothing else, with one exception: if no chat model at all is running, it will
+start Ornith for you, and only if Ornith is already downloaded and there is room in the NPU
+budget for it. A load that does not fit is rolled back by the device silently, so it does
+not try. If something else is holding budget, unload it first or the image model will
+refuse to start. Check what is up with `curl localhost:8420/api/models` once the lantern is
+running.
+
+**No chat model at all?** The lamp shows a calm card and the story is refused before any
+page is written. The exact reason - which models would do, and what the device is holding
+instead - is on the parent page, which also says who told each story.
+
+## What changed in 0.1.3
+
+0.1.2 hard-coded one chat model id. If your Tiiny was not holding that exact model, every
+story died five seconds after your child asked for it, with an HTTP 404 in the log and a
+"Goodnight" on the lamp - even on a device with two perfectly good chat models running. The
+storyteller is now chosen per story from what is actually loaded, model ids are compared
+case-insensitively (the vendor renamed one of them by a single capital letter), and a story
+that has nobody to tell it fails before any page work with a calm card on the lamp and an
+actionable sentence for the parent instead of a goodnight for a story that never started.
 
 ---
 
@@ -205,6 +228,12 @@ on USB needs the cable actually attached: look for a `172.17.x.x` address in `if
 **The narration never plays.** The kiosk is missing
 `--autoplay-policy=no-user-gesture-required`. In an ordinary browser tab, any click on the
 page unlocks audio.
+
+**The lamp says the lantern needs a storyteller.** There is no chat model loaded on the
+Tiiny. Load one in TiinyOS - Ornith-1.0-35B, Qwen3.8-27B and Qwen3-8B all work - and ask
+again. The parent page carries the exact sentence, including what the device was holding
+instead. Before 0.1.3 this failed as a story that ended immediately, which is how it stayed
+undiagnosed.
 
 **The image model refuses to start.** Something else on the device is holding NPU budget.
 `curl localhost:8420/api/models` lists what is running; unload whatever you do not need.
@@ -359,6 +388,7 @@ The obvious extensions, roughly in order of how much fun they are:
 
 ```bash
 python3 tests/fake_device_test.py     # the whole engine against a fake device, no hardware
+python3 tests/storyteller_test.py     # who tells the story, and what happens when nobody can
 python3 safety.py                     # adversarial self-test on the safety layer
 python3 lantern.py --selfcheck        # one real story, end to end, with timings
 ```

@@ -9,8 +9,8 @@ the same. Nothing leaves the house.
 
 Everything here runs on the Python standard library. The only network peer is
 one Tiiny Pocket on the LAN, which does all of the inference: story text
-(Ornith-1.0-35B), illustration (Z-Image-Turbo), narration (Qwen3-TTS
-CustomVoice).
+(whichever chat model the device is holding, Ornith-1.0-35B preferred),
+illustration (Z-Image-Turbo), narration (Qwen3-TTS CustomVoice).
 
     python3 lantern.py                      # serve on :8420
     python3 lantern.py --selfcheck          # one short story, live device, timings
@@ -80,18 +80,54 @@ from datetime import datetime, timezone
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 import device  # noqa: E402  - beside this file, not a package
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 # --------------------------------------------------------------------------
 # Configuration
 # --------------------------------------------------------------------------
 
-# Model IDs are exactly what this firmware answers to. They are constants, not
-# parameters: a rename is a firmware event that should break loudly here rather
-# than silently produce a story with no pictures.
+# The picture and the voice are constants: there is exactly one of each on this
+# firmware, and a rename there should break loudly rather than silently produce a
+# story with no plates.
+#
+# The storyteller is NOT a constant, and pretending it was is the bug this
+# release exists to fix. A hard-coded MODEL_TEXT meant that a device holding two
+# perfectly good chat models answered the very first call with
+# HTTP 404 "…Ornith-1.0-35B is not loaded", five seconds after a child asked for
+# a story, and the lamp said goodnight. MODEL_TEXT is now the PREFERRED name
+# only; pick_storyteller chooses from what the device is actually running, once
+# per story. See STORYTELLER_PREFERENCE.
 MODEL_TEXT = "deepreinforce-ai/Ornith-1.0-35B"
+MODEL_TEXT_NPU = 50        # what Ornith costs, if the device will not say
 MODEL_IMAGE = "Tongyi-MAI/Z-Image-Turbo"
 MODEL_TTS = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+
+# Preference order among the chat models that happen to be running. Ornith first
+# because the charter, the page prompts and the safety rubric were all written
+# and measured against it; after that, newest and largest first, then anything
+# else that can hold a conversation. Matched as a case-insensitive substring of
+# the model id.
+STORYTELLER_PREFERENCE = ("Ornith", "Qwen3.8", "Qwen3.6", "Qwen3-30B", "Qwen3.5",
+                          "gpt-oss", "GLM")
+
+# Running, but nobody's storyteller. The device names its families plainly in the
+# id, which matters because /v1/models does not always carry a type for every
+# entry - so this list, not the metadata, is what keeps the picker from handing a
+# bedtime story to the reranker.
+NOT_A_STORYTELLER = ("coder", "embed", "rerank", "ocr", "asr", "whisper",
+                     "tts", "speech", "voice", "image", "music", "video")
+
+# What the lamp says when there is nobody to tell the story. It names no model,
+# no host and no error: a five-year-old can act on "ask a grown-up" and cannot
+# act on anything else. The exact reason goes to the parent page instead.
+NO_STORYTELLER_LINE = ("The lantern needs a storyteller. "
+                       "Ask a grown-up to check the Tiiny.")
+
+# Reading a model list is a cheap GET, not an inference, so it gets a short HTTP
+# timeout. The deadline it is waited on varies with who is waiting: see
+# running_models and StorySession.choose_storyteller.
+MODEL_READ_TIMEOUT_S = 20.0
+PICK_DEADLINE_S = 25.0
 
 # 512x512 is the ONLY size this firmware accepts. Every other size fails with
 # device error 150004 after a ~30s stall. Do not parameterise it. The frame is
@@ -360,6 +396,23 @@ class LanternBusy(Exception):
     """We rode out the whole backoff budget and the device is still busy."""
 
 
+class NoStoryteller(Exception):
+    """There is no chat model on the device, so there is nobody to tell a story.
+
+    Carries a sentence written for the PARENT: which models would do, and what
+    the device is holding instead. That sentence never reaches the lamp - the
+    child gets NO_STORYTELLER_LINE and nothing else.
+    """
+
+    reason = "no_storyteller"
+
+    def __init__(self, sentence: str, running: list | None = None):
+        super().__init__(sentence)
+        self.sentence = sentence
+        self.running = list(running or [])
+        self.story_id: int | None = None
+
+
 class ChildSafeError(ValueError):
     """An error whose message is safe to SAY OUT LOUD to a five-year-old.
 
@@ -409,11 +462,17 @@ class DeviceWorker(threading.Thread):
         return fut
 
     def chat(self, messages, *, lane=LANE_LIVE, max_tokens=900, temperature=0.85,
-             label="chat", story_id=None, timeout=420.0, nothink=False) -> Future:
+             label="chat", story_id=None, timeout=420.0, nothink=False,
+             model: str | None = None) -> Future:
+        # `model` is whoever is telling tonight's story, chosen once per story
+        # from what the device is holding. MODEL_TEXT is only the fallback for
+        # callers outside a story (the calibration harness); a story that sent
+        # the constant instead of its own choice is the 404 this release fixed.
+        #
         # Never send a small budget: Ornith's reasoning eats max_tokens and the
         # content field comes back empty. See MIN_MAX_TOKENS.
         body = {
-            "model": MODEL_TEXT,
+            "model": model or MODEL_TEXT,
             "messages": messages,
             "max_tokens": max(int(max_tokens), MIN_MAX_TOKENS),
             "temperature": temperature,
@@ -640,59 +699,297 @@ TTS_IDLE_UNLOAD_S = float(os.environ.get("LANTERN_TTS_IDLE_S", "1200"))
 TTS_RETRY_BASE_S = 60.0
 TTS_RETRY_MAX_S = 3600.0
 #
-# NPU budget on this box is 100 units and Daybreak holds 85 of them (Ornith 50,
-# Z-Image 32, embedder 1, reranker 2). TTS is +7 = 92, which fits. ASR is NOT
-# loaded: there is no room while Daybreak runs, so the MVP takes typed input
-# and voice input stays a documented future option. Do not "just try" ASR here.
+# NPU budget on this box is 100 units, it is shared with whatever else the owner
+# is running, and a load that does not fit is rolled back SILENTLY - the /start
+# call returns 200 and the model simply never appears in the running list. So
+# nothing here starts a model without first asking what is free: see
+# preferred_model_fits. The voice costs 7 units, which is why it is the one model
+# the lantern manages. Z-Image (32) and a 35B chat model (50) are the owner's to
+# load. ASR is not loaded either: typed input is the MVP and voice input stays a
+# documented future option. Do not "just try" a model here and hope.
 
-def tts_running(worker: DeviceWorker) -> bool:
-    # The deadline has to cover the job's own worst case (30s HTTP + a full
-    # busy_max_wait ride) or we abandon a control call every four seconds while
-    # it is still queued - and every abandoned one is still executed against a
-    # device we share with production.
-    fut = worker.control("/api/v1/models/running", method="GET",
-                         label="models.running", timeout=30)
+
+def _same_model(a: str, b: str) -> bool:
+    """Compare two model ids the way the device means them, not byte for byte.
+
+    The vendor renamed "Qwen/Qwen3.6-35B-A3B-turbo" to "...-Turbo" in the store
+    while the installed copy kept the lowercase t, so an exact match on the
+    running list reports a model absent that is right there in front of us. Only
+    the COMPARISON is loosened: an id we are about to call with is always sent
+    back exactly as the device spelled it.
+    """
+    return (a or "").strip().lower() == (b or "").strip().lower()
+
+
+def _listed(ids, want: str) -> bool:
+    return any(_same_model(str(i), want) for i in (ids or []))
+
+
+def running_models(worker: DeviceWorker, deadline: float | None = None) -> list[str]:
+    """What the device is holding right now. Raises if it will not say.
+
+    Deliberately not softened to an empty list. "The device did not answer" and
+    "the device answered, and there is no storyteller in it" are two different
+    things a parent needs told apart, and swallowing the first one turns a pulled
+    cable into a lecture about loading models.
+
+    The default deadline covers the job's own worst case - one HTTP timeout plus
+    a full busy_max_wait ride - because a control call abandoned while still
+    queued is executed anyway, against a device we share.
+    """
+    if deadline is None:
+        deadline = MODEL_READ_TIMEOUT_S + worker.cfg.busy_max_wait + 15
+    fut = worker.control("/api/v1/models/running", method="GET", lane=LANE_LIVE,
+                         label="models.running", timeout=MODEL_READ_TIMEOUT_S)
+    data = await_result(fut, deadline)
+    out = []
+    for entry in ((data or {}).get("running") or []):
+        if isinstance(entry, str):
+            mid = entry
+        elif isinstance(entry, dict):
+            mid = entry.get("id") or entry.get("model") or entry.get("fullname") or ""
+        else:
+            mid = ""
+        if str(mid).strip():
+            out.append(str(mid).strip())
+    return out
+
+
+def model_catalog(worker: DeviceWorker) -> dict:
+    """/v1/models, indexed by lower-cased id. Soft: {} when the device will not say.
+
+    This is the only thing that knows whether a running model can hold a
+    conversation at all. When it is missing the picker falls back to reading the
+    id, which is exactly what NOT_A_STORYTELLER is for.
+    """
     try:
-        data = await_result(fut, 30 + worker.cfg.busy_max_wait + 15)
-    except Exception:  # noqa: BLE001
+        fut = worker.control("/v1/models", method="GET", lane=LANE_LIVE,
+                             label="models.catalog", timeout=MODEL_READ_TIMEOUT_S)
+        data = await_result(fut, MODEL_READ_TIMEOUT_S + worker.cfg.busy_max_wait + 15)
+    except Exception as exc:  # noqa: BLE001 - the id is enough to go on
+        log("model catalog unavailable, going on the ids alone:", exc)
+        return {}
+    rows = data.get("data") if isinstance(data, dict) else data
+    out = {}
+    for row in (rows or []):
+        if not isinstance(row, dict):
+            continue
+        mid = row.get("id") or row.get("model") or row.get("fullname") or ""
+        if str(mid).strip():
+            out[str(mid).strip().lower()] = row
+    return out
+
+
+def _chat_capable(model_id: str, entry: dict | None) -> bool:
+    """Could this running model narrate a page?
+
+    The id is checked first and it is the only check that can veto. A model whose
+    name says coder, embedding, reranker, OCR, ASR, TTS, image or music is not a
+    storyteller however its metadata is shaped, and the metadata is the part that
+    varies between firmwares.
+    """
+    low = (model_id or "").lower()
+    if not low or any(bad in low for bad in NOT_A_STORYTELLER):
         return False
-    return MODEL_TTS in ((data or {}).get("running") or [])
+    if not entry:
+        return True                       # no metadata; the id is all we have
+    if "supports_chat" in entry:
+        return bool(entry.get("supports_chat"))
+    kind = str(entry.get("type") or "").lower()
+    if "text generation" in kind or "image-text-to-text" in kind:
+        return True
+    caps = [str(c).lower() for c in (entry.get("capabilities") or [])]
+    return "main" in caps or "chat" in caps
 
 
-def tts_start(worker: DeviceWorker, wait: bool = True, poll_s: float = 240.0) -> bool:
-    """Start the narration model and WAIT until the device agrees it is running.
+def pick_storyteller(worker: DeviceWorker, *, running=None, catalog=None) -> str | None:
+    """Who is telling tonight's story, out of what the device already holds.
+
+    Returns the model id exactly as the device spelled it, or None if nothing
+    running can hold a conversation. Called once per story - a story told half by
+    one model and half by another would drift in voice between pages, which a
+    child notices faster than an adult does.
+    """
+    ids = running_models(worker) if running is None else list(running)
+    cat = model_catalog(worker) if catalog is None else dict(catalog)
+    chat = [m for m in ids if _chat_capable(m, cat.get(m.strip().lower()))]
+    if not chat:
+        return None
+    for want in STORYTELLER_PREFERENCE:
+        for mid in chat:
+            if want.lower() in mid.lower():
+                return mid
+    return chat[0]
+
+
+def installed_models(worker: DeviceWorker) -> list[dict]:
+    """Everything on the device's disk, downloaded or not. Soft: [] on failure."""
+    try:
+        fut = worker.control("/api/v1/models/", method="GET", lane=LANE_LIVE,
+                             label="models.installed", timeout=MODEL_READ_TIMEOUT_S)
+        data = await_result(fut, MODEL_READ_TIMEOUT_S + worker.cfg.busy_max_wait + 15)
+    except Exception as exc:  # noqa: BLE001
+        log("installed model list unavailable:", exc)
+        return []
+    rows = data.get("data") if isinstance(data, dict) else data
+    return [r for r in (rows or []) if isinstance(r, dict)]
+
+
+def npu_free(worker: DeviceWorker) -> int | None:
+    """Unclaimed NPU units, or None if the device would not say.
+
+    None is not zero and must not be treated as room: the budget is the one
+    number that decides whether a load sticks or is rolled back behind our back.
+    """
+    try:
+        fut = worker.control("/api/v1/models/npu/status", method="GET", lane=LANE_LIVE,
+                             label="models.npu", timeout=MODEL_READ_TIMEOUT_S)
+        data = await_result(fut, MODEL_READ_TIMEOUT_S + worker.cfg.busy_max_wait + 15)
+    except Exception as exc:  # noqa: BLE001
+        log("NPU budget unavailable:", exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("npu_available") is not None:
+        try:
+            return int(data["npu_available"])
+        except (TypeError, ValueError):
+            return None
+    try:
+        return int(data["npu_total"]) - int(data["npu_used"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def preferred_model_fits(worker: DeviceWorker) -> tuple[bool, int | None, int | None]:
+    """May the lantern start MODEL_TEXT? Returns (fits, its cost, units free).
+
+    Two conditions, both required. It has to be on the disk already - the lantern
+    downloads nothing, a 35B model is a 20GB decision its owner makes - and it has
+    to fit in what is free, because a load that does not fit is rolled back
+    silently and all we would have achieved is a four-minute wait before the same
+    failure.
+    """
+    entries = installed_models(worker)
+    mine = None
+    for row in entries:
+        mid = row.get("id") or row.get("model") or row.get("fullname") or ""
+        if _same_model(str(mid), MODEL_TEXT):
+            mine = row
+            break
+    if mine is None:
+        return False, None, None
+    status = str(mine.get("status") or "downloaded").lower()
+    if status in ("not_downloaded", "downloading"):
+        return False, None, None
+    try:
+        usage = int(mine.get("npu_usage") or mine.get("npu") or MODEL_TEXT_NPU)
+    except (TypeError, ValueError):
+        usage = MODEL_TEXT_NPU
+    free = npu_free(worker)
+    if free is None:
+        return False, usage, None
+    return free >= usage, usage, free
+
+
+def _start_and_wait(worker: DeviceWorker, model_id: str, *, label: str,
+                    poll_s: float, wait: bool = True) -> bool:
+    """POST /start, then poll until the device agrees the model is running.
 
     The /start endpoint returns 200 in about a fifth of a second and then loads
     the model asynchronously. Believing that 200 is a real bug we hit live: the
     first story call went out one second later, landed while the runtime was
     still reallocating the NPU, and came back HTTP 502 "Upstream model server
     request failed" - which killed the story before page one. So we poll
-    /api/v1/models/running the way the device's own loader script does, and we
-    do it through the worker queue like every other device call.
+    /api/v1/models/running the way the device's own loader script does, and we do
+    it through the worker queue like every other device call.
     """
-    if tts_running(worker):
-        log("TTS model already running")
-        return True
-    enc = urllib.parse.quote(MODEL_TTS, safe="")
-    fut = worker.control(f"/api/v1/models/{enc}/start", label="tts.start", timeout=300)
+    enc = urllib.parse.quote(model_id, safe="")
+    fut = worker.control(f"/api/v1/models/{enc}/start", label=f"{label}.start",
+                         timeout=300)
     if not wait:
         return True
     try:
         await_result(fut, 320)
     except Exception as exc:  # noqa: BLE001
-        log("TTS start failed (narration will degrade):", exc)
+        log(f"{label} start failed:", exc)
         return False
     t0 = time.time()
     while time.time() - t0 < poll_s:
-        if tts_running(worker):
-            log(f"TTS model running after {time.time()-t0:.1f}s")
+        if model_is_running(worker, model_id):
+            log(f"{label} running after {time.time()-t0:.1f}s")
             # The runtime is listed before it is settled. A couple of seconds
             # here is far cheaper than a 502 on the call the child is waiting on.
             time.sleep(2.0)
             return True
         time.sleep(4.0)
-    log("TTS model did not reach running in time (narration will degrade)")
+    log(f"{label} did not reach running in time")
     return False
+
+
+def model_is_running(worker: DeviceWorker, model_id: str) -> bool:
+    try:
+        return _listed(running_models(worker), model_id)
+    except Exception:  # noqa: BLE001 - a poll that cannot ask is a poll that waits
+        return False
+
+
+def preferred_model_start(worker: DeviceWorker, poll_s: float = 300.0) -> bool:
+    """Load MODEL_TEXT, for a device that has one but is not holding it.
+
+    Only ever called after preferred_model_fits said yes. A 35B model is minutes,
+    not the fifteen seconds the voice takes, which is why this runs on the
+    producer thread and not on the request the child is waiting on.
+    """
+    if model_is_running(worker, MODEL_TEXT):
+        return True
+    log(f"starting {MODEL_TEXT} for a story with no storyteller")
+    return _start_and_wait(worker, MODEL_TEXT, label="text.start", poll_s=poll_s)
+
+
+def no_storyteller_sentence(running, usage: int | None = None,
+                            free: int | None = None) -> str:
+    """The sentence the PARENT reads. Names what to load and what is loaded.
+
+    Written to be actionable at the TiinyOS screen with no further diagnosis:
+    three model names that work, and the list the device answered with.
+    """
+    holds = ", ".join(str(m) for m in (running or [])) or "nothing"
+    line = ("No chat model is loaded on the Tiiny. Load Ornith-1.0-35B, "
+            "Qwen3.8-27B or Qwen3-8B in TiinyOS and try again. "
+            f"Right now it holds: {holds}.")
+    if usage is not None and free is not None:
+        line += (f" Ornith-1.0-35B is installed but needs {usage} NPU units and only "
+                 f"{free} are free, so the lantern did not try to start it.")
+    return line
+
+
+def failure_reason(exc: Exception) -> str:
+    """One word for what went wrong, for the lamp and the story record.
+
+    Three outcomes, because they need three different answers: load a model,
+    check the device, or nothing the parent can do from here.
+    """
+    if isinstance(exc, NoStoryteller):
+        return "no_storyteller"
+    if isinstance(exc, (DeviceUnreachable, LanternBusy)):
+        return "device_unreachable"
+    return "failed"
+
+
+def tts_running(worker: DeviceWorker) -> bool:
+    return model_is_running(worker, MODEL_TTS)
+
+
+def tts_start(worker: DeviceWorker, wait: bool = True, poll_s: float = 240.0) -> bool:
+    """Start the narration model and WAIT until the device agrees it is running."""
+    if tts_running(worker):
+        log("TTS model already running")
+        return True
+    ok = _start_and_wait(worker, MODEL_TTS, label="tts", poll_s=poll_s, wait=wait)
+    if not ok:
+        log("TTS unavailable; narration will degrade to text")
+    return ok
 
 
 def tts_stop(worker: DeviceWorker) -> None:
@@ -1050,8 +1347,9 @@ def await_result(fut: Future, seconds: float):
 
 
 def chat_json(worker: "DeviceWorker", messages, *, lane, max_tokens, temperature,
-              label, story_id=None, timeout=420.0, parse=parse_model_json) -> dict:
-    """Ask Ornith for a JSON object and actually get one.
+              label, story_id=None, timeout=420.0, parse=parse_model_json,
+              model: str | None = None) -> dict:
+    """Ask the storyteller for a JSON object and actually get one.
 
     Two attempts, and the order matters. Both of these are lessons this exact
     firmware taught, not defensive habit:
@@ -1081,7 +1379,8 @@ def chat_json(worker: "DeviceWorker", messages, *, lane, max_tokens, temperature
         fut = worker.chat(messages, lane=lane, max_tokens=budget,
                           temperature=temperature,
                           label=label if nothink else f"{label}.think",
-                          story_id=story_id, timeout=timeout, nothink=nothink)
+                          story_id=story_id, timeout=timeout, nothink=nothink,
+                          model=model)
         try:
             return parse(await_result(fut, deadline), label)
         except LanternBusy:
@@ -1296,6 +1595,12 @@ class StorySession:
         self.pages: dict[int, PageState] = {}
         self.status = "planning"
 
+        # Who is telling this one. Chosen once, before any page work, and used
+        # for the plan, every page and every safety pass. None until then.
+        self.storyteller: str | None = None
+        self.start_preferred = False       # nobody home, but MODEL_TEXT would fit
+        self.failure_reason: str | None = None
+
         self.reading_idx = -1              # highest page the child has started
         self._cv = threading.Condition()
         self.stop_event = threading.Event()
@@ -1327,11 +1632,66 @@ class StorySession:
                 self.reading_idx = idx
                 self._cv.notify_all()
 
+    # ---- who is telling it ------------------------------------------------
+
+    def choose_storyteller(self) -> None:
+        """Pick tonight's storyteller before any page work, or refuse the story.
+
+        Runs on the REQUEST thread, on purpose. A story with nobody to tell it
+        must not reach the producer, publish a plan and a workshop, and then say
+        goodnight to a child who never heard a word - which is what a hard-coded
+        model id bought us: a 404 five seconds after the button, dressed up as
+        the end of a story. Refusing here means the lamp shows a calm card and
+        the parent log carries the sentence, in the same second.
+
+        Only the cheap half is done here. Two GETs is a fraction of a second;
+        loading a 35B model is minutes and belongs on the producer thread.
+        """
+        try:
+            running = running_models(self.worker, deadline=PICK_DEADLINE_S)
+        except Exception as exc:  # noqa: BLE001
+            # The device would not say what it holds. That is not "no chat
+            # model", it is "we could not ask", and the difference matters to the
+            # parent. Hand the question to the producer, which has the whole
+            # backoff budget and is not holding a request open.
+            log(f"story {self.story_id}: could not read the running models:", exc)
+            return
+        chosen = pick_storyteller(self.worker, running=running)
+        if chosen:
+            self._set_storyteller(chosen)
+            return
+        fits, usage, free = preferred_model_fits(self.worker)
+        if fits:
+            self.start_preferred = True
+            log(f"story {self.story_id}: no chat model running; {MODEL_TEXT} fits, "
+                f"the producer will start it")
+            return
+        raise NoStoryteller(no_storyteller_sentence(running, usage, free), running)
+
+    def _ensure_storyteller(self) -> None:
+        """The producer's half: load the preferred model if that was the plan."""
+        if self.storyteller:
+            return
+        if self.start_preferred:
+            preferred_model_start(self.worker)
+        running = running_models(self.worker)
+        chosen = pick_storyteller(self.worker, running=running)
+        if not chosen:
+            fits, usage, free = preferred_model_fits(self.worker)
+            raise NoStoryteller(no_storyteller_sentence(running, usage, free), running)
+        self._set_storyteller(chosen)
+
+    def _set_storyteller(self, model_id: str) -> None:
+        self.storyteller = model_id
+        log(f"story {self.story_id}: told by {model_id}")
+        self._merge_theme(storyteller=model_id)
+
     # ---- the producer -----------------------------------------------------
 
     def _run(self) -> None:
         t_start = time.time()
         try:
+            self._ensure_storyteller()
             self._plan()
             if self.stop_event.is_set():
                 return
@@ -1351,9 +1711,16 @@ class StorySession:
                     ui=("end", {"story_id": self.story_id, "reason": "finished"}))
         except Exception as exc:  # noqa: BLE001
             log(f"story {self.story_id} failed:", repr(exc))
+            if not self.pages:
+                # Nothing was ever read. There is no story to say goodnight to.
+                self.fail_before_pages(exc)
+                return
             self._set_status("failed")
-            # The child hears a goodnight, not an error. The parent log has the
-            # exception; the lamp gets a warm line and fades to a candle.
+            self.failure_reason = failure_reason(exc)
+            self._merge_theme(reason=self.failure_reason, parent_line=str(exc)[:300])
+            # A story that broke at page five DID happen, so the child hears a
+            # goodnight, not an error. The parent log has the exception; the lamp
+            # gets a warm line and fades to a candle.
             #
             # Unless this session was superseded - a producer parked in a 420s
             # device call can surface long after the child asked for something
@@ -1361,6 +1728,7 @@ class StorySession:
             # than saying nothing.
             if not self.stop_event.is_set():
                 self.bus.publish("story.failed", {"story_id": self.story_id,
+                                                  "reason": self.failure_reason,
                                                   "error": str(exc)[:200]},
                                  ui=("end", {"story_id": self.story_id,
                                              "reason": "failed",
@@ -1475,7 +1843,8 @@ class StorySession:
             self.worker,
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             lane=LANE_LIVE, max_tokens=1600, temperature=0.85,
-            label="plan", story_id=self.story_id, timeout=420.0)
+            label="plan", story_id=self.story_id, timeout=420.0,
+            model=self.storyteller)
         self._time("plan", t0)
 
         # The plan call is the one call with the child's raw request interpolated
@@ -1517,19 +1886,20 @@ class StorySession:
         while len(self.spine) < self.page_count:
             self.spine.append("Everyone settles down to sleep.")
 
+        # Merged, not overwritten: the storyteller was written into this column
+        # before the plan call was made and must survive it.
+        self._merge_theme(setting=self.setting,
+                          characters=list(self.cast),
+                          page_count=self.page_count,
+                          # parent_api._redirect_note reads this key. Without it
+                          # the parent page's "the lantern said: …" line can
+                          # never fire, and a parent skimming a story header
+                          # cannot see that "zombies" became "a very polite
+                          # skeleton".
+                          redirect_note=self.redirect_note or None)
         conn = db()
-        conn.execute("UPDATE story SET title=?, spine=?, theme_contract=?, status=? WHERE id=?",
-                     (self.title, json.dumps(self.spine),
-                      json.dumps({"setting": self.setting,
-                                  "characters": list(self.cast),
-                                  "page_count": self.page_count,
-                                  # parent_api._redirect_note reads this key.
-                                  # Without it the parent page's "the lantern
-                                  # said: …" line can never fire, and a parent
-                                  # skimming a story header cannot see that
-                                  # "zombies" became "a very polite skeleton".
-                                  "redirect_note": self.redirect_note or None}),
-                      "telling", self.story_id))
+        conn.execute("UPDATE story SET title=?, spine=?, status=? WHERE id=?",
+                     (self.title, json.dumps(self.spine), "telling", self.story_id))
         conn.commit()
 
         first = plan.get("first_page")
@@ -1748,7 +2118,8 @@ class StorySession:
                 [{"role": "system", "content": CHARTER.format(age=self.cfg.child_age)},
                  {"role": "user", "content": user}],
                 lane=lane, max_tokens=1000, temperature=0.85,
-                label=f"page{idx+1}.text", story_id=self.story_id, timeout=420.0)
+                label=f"page{idx+1}.text", story_id=self.story_id, timeout=420.0,
+                model=self.storyteller)
         except Exception as exc:  # noqa: BLE001 - LanternBusy, DeviceError, timeout
             log(f"page {idx+1} text failed:", exc)
             return None
@@ -1809,7 +2180,7 @@ class StorySession:
                  {"role": "user", "content": CLASSIFIER_USER.format(text=text)}],
                 lane=lane, max_tokens=MIN_MAX_TOKENS, temperature=0.0,
                 label=f"page{idx+1}.safety", story_id=self.story_id, timeout=300.0,
-                parse=parse_verdict_json)
+                parse=parse_verdict_json, model=self.storyteller)
             verdict = str(data.get("verdict") or "").strip().upper()
             reason = str(data.get("reason") or "")[:200]
         except Exception as exc:  # noqa: BLE001
@@ -2059,6 +2430,60 @@ class StorySession:
         else:
             conn.execute("UPDATE story SET status=? WHERE id=?", (status, self.story_id))
         conn.commit()
+
+    def _merge_theme(self, **fields) -> None:
+        """Read-modify-write on story.theme_contract.
+
+        Three different moments on two different threads write into that column -
+        the storyteller at the start, the plan in the middle, a failure at the
+        end - and the plan used to write the whole column at once, so anything
+        set before it disappeared. Merging is also what keeps the storyteller and
+        the failure reason out of the schema: they are facts ABOUT one story, the
+        database is a family's story shelf, and an ALTER TABLE on an appliance
+        that never restarts is a migration nobody is there to run.
+        """
+        conn = db()
+        row = conn.execute("SELECT theme_contract FROM story WHERE id=?",
+                           (self.story_id,)).fetchone()
+        try:
+            theme = json.loads((row["theme_contract"] if row else "") or "{}")
+        except (ValueError, TypeError):
+            theme = {}
+        if not isinstance(theme, dict):
+            theme = {}
+        theme.update(fields)
+        conn.execute("UPDATE story SET theme_contract=? WHERE id=?",
+                     (json.dumps(theme), self.story_id))
+        conn.commit()
+
+    def fail_before_pages(self, exc: Exception) -> str:
+        """A story that died before page one. No goodnight: there was no story.
+
+        The old path said "that is enough story for tonight" and faded to a
+        candle whatever had happened, which is right for a story that broke at
+        page five and wrong for one that never started. A child who asked ten
+        seconds ago is told the thing they were waiting for is over; the grown-up
+        is told nothing at all; and the actual condition - no chat model loaded -
+        is sitting in a log file nobody is reading at bedtime. So a pre-page
+        failure publishes its reason, the lamp shows a calm card that stays until
+        someone dismisses it, and the exact sentence goes to the parent page.
+
+        The sentence never rides the event bus. It names models, and the lamp is
+        the one screen in this product that must never show a model id.
+        """
+        reason = failure_reason(exc)
+        self.failure_reason = reason
+        self._set_status("failed")
+        line = exc.sentence if isinstance(exc, NoStoryteller) else str(exc)[:300]
+        self._merge_theme(reason=reason, parent_line=line,
+                          storyteller=self.storyteller)
+        if self.stop_event.is_set():
+            return reason              # superseded; the child moved on already
+        self.bus.publish("story.failed",
+                         {"story_id": self.story_id, "reason": reason},
+                         ui=("end", {"story_id": self.story_id, "reason": reason,
+                                     "line": NO_STORYTELLER_LINE}))
+        return reason
 
     def _time(self, label: str, t0: float) -> None:
         self.timings.append((label, round(time.time() - t0, 2)))
@@ -2391,6 +2816,15 @@ class Lantern:
                                            "page_count": pages},
                          ui=("state", {"story_id": story_id, "state": "thinking",
                                        "line": request}))
+        # Who is telling it, before anything else is spent on it. This costs two
+        # GETs and it is what stops a story with no storyteller from loading the
+        # voice model, publishing a plan, and then apologising to a child.
+        try:
+            session.choose_storyteller()
+        except NoStoryteller as exc:
+            exc.story_id = story_id
+            session.fail_before_pages(exc)
+            raise
         # Kept on the object so _build_page(0) can join it before narrating.
         self._tts_thread = threading.Thread(target=self.ensure_tts,
                                             name="ensure-tts", daemon=True)
@@ -2407,7 +2841,12 @@ class Lantern:
         """
         s = self.session
         if not s or s.status in ("stopped", "failed"):
-            return {"state": "idle", "story": None, "pages": []}
+            # A story that failed before page one leaves its reason here, so a
+            # lamp that reconnects (or falls back to polling) can still put the
+            # calm card up instead of a candle that looks fine.
+            return {"state": "idle", "story": None, "pages": [],
+                    "storyteller": getattr(s, "storyteller", None) if s else None,
+                    "reason": getattr(s, "failure_reason", None) if s else None}
         state = {"planning": "thinking", "telling": "telling",
                  "finished": "ending"}.get(s.status, "idle")
         # current_idx is the page the child is READING, not the newest page we
@@ -2428,6 +2867,8 @@ class Lantern:
                       "page_count": s.page_count},
             "current_idx": current_idx,
             "pages": [s._ui_page(p) for _, p in items],
+            "storyteller": getattr(s, "storyteller", None),
+            "reason": getattr(s, "failure_reason", None),
         }
 
     def shutdown(self) -> None:
@@ -2515,6 +2956,12 @@ def story_json(story_id: int) -> dict | None:
                          (story_id,)).fetchall()
     events = conn.execute("SELECT * FROM safety_event WHERE story_id=? ORDER BY id",
                           (story_id,)).fetchall()
+    try:
+        theme = json.loads(row["theme_contract"] or "{}")
+    except (ValueError, TypeError):
+        theme = {}
+    if not isinstance(theme, dict):
+        theme = {}
     return {
         "id": row["id"],
         "created_at": row["created_at"],
@@ -2523,7 +2970,14 @@ def story_json(story_id: int) -> dict | None:
         "status": row["status"],
         "page_count": row["page_count"],
         "spine": json.loads(row["spine"] or "[]"),
-        "theme": json.loads(row["theme_contract"] or "{}"),
+        "theme": theme,
+        # Who told it, and - if it never got started - why not. Both are lifted
+        # out of the theme blob to the top level because they are the two
+        # questions asked of a story that came out wrong, and nobody should have
+        # to know where they are stored to ask them.
+        "storyteller": theme.get("storyteller"),
+        "reason": theme.get("reason"),
+        "parent_line": theme.get("parent_line"),
         "finished_at": row["finished_at"],
         "pages": [{
             "id": p["id"], "idx": p["idx"], "text": p["text"],
@@ -2536,6 +2990,34 @@ def story_json(story_id: int) -> dict | None:
         } for p in pages],
         "safety_events": [dict(e) for e in events],
     }
+
+
+def with_story_provenance(data: dict) -> dict:
+    """Add who told each story, and why one never started, to the parent view.
+
+    parent_api owns the shape of that payload and deliberately keeps only the
+    fields it knows about, so these two are attached here rather than by widening
+    a file whose whole point is that it is small. The parent page is the only
+    screen that gets them: "told by <model>" and the sentence naming what to load
+    are exactly what the lamp must never show.
+    """
+    try:
+        rows = {r["id"]: r["theme_contract"] for r in
+                db().execute("SELECT id, theme_contract FROM story")}
+    except Exception as exc:  # noqa: BLE001 - the log must never fail to render
+        log("story provenance lookup failed:", exc)
+        return data
+    for story in (data.get("stories") or []):
+        try:
+            theme = json.loads(rows.get(story.get("id")) or "{}")
+        except (ValueError, TypeError):
+            theme = {}
+        if not isinstance(theme, dict):
+            theme = {}
+        story["storyteller"] = theme.get("storyteller")
+        story["reason"] = theme.get("reason")
+        story["parent_line"] = theme.get("parent_line")
+    return data
 
 
 def stories_json(limit: int = 40) -> list[dict]:
@@ -2755,12 +3237,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/parent/data":
             if _parent_api is not None:
                 try:
-                    return self._json(_parent_api.parent_data(
+                    return self._json(with_story_provenance(_parent_api.parent_data(
                         db(), child={"name": L.cfg.child_name, "age": L.cfg.child_age},
                         media_root=L.cfg.media_dir,
                         charter_version=getattr(L.cfg, "charter_version", None),
                         residency_warning=CLASSIFIER_OFF_WARNING
-                        if not L.cfg.safety_classifier else None))
+                        if not L.cfg.safety_classifier else None)))
                 except Exception as exc:  # noqa: BLE001 - fall back to the built-in view
                     log("parent_api.parent_data failed, serving built-in view:", exc)
             return self._json({
@@ -2799,6 +3281,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             request = str(body.get("request") or body.get("text") or "")
             try:
                 session = L.start_story(request, body.get("pages"))
+            except NoStoryteller as exc:
+                # The lamp already has its calm card, off the story.failed event
+                # fail_before_pages published. The parent has the sentence, on
+                # /parent. This body is for whoever is holding a terminal, and it
+                # names no model on purpose: a browser is not the right place to
+                # learn what the device is missing.
+                log(f"story {exc.story_id} refused: {exc.sentence}")
+                return self._json({"ok": False, "reason": exc.reason,
+                                   "story_id": exc.story_id}, 503)
             except ChildSafeError as exc:
                 # Not an error the child should see: the lamp says the line.
                 L.bus.publish("request.unclear", {"line": str(exc)},
@@ -3061,7 +3552,13 @@ def selfcheck(lantern: Lantern, request: str, pages: int) -> int:
     print(f"  TTS model: {'ready' if lantern.tts_ready else 'UNAVAILABLE (narration will be skipped)'}"
           f"  (+{time.time()-t0:.1f}s)")
 
-    session = lantern.start_story(request, pages, auto_advance=True)
+    try:
+        session = lantern.start_story(request, pages, auto_advance=True)
+    except NoStoryteller as exc:
+        # The install test's whole job is to fail in seconds with a reason you
+        # can act on, and "load a chat model" is the most actionable one there is.
+        print(f"\n  {exc.sentence}\n\n  RESULT: FAIL")
+        return 1
 
     def playable() -> bool:
         # "Playable" means there is a voice to start the page with, or - if
@@ -3081,6 +3578,7 @@ def selfcheck(lantern: Lantern, request: str, pages: int) -> int:
 
     print(f'\n  title: "{session.title}"   setting: {session.setting}'
           f"   status: {session.status}")
+    print(f"  told by: {session.storyteller or 'nobody'}")
     print("\n  cast (frozen descriptors reused in every future story):")
     for row in session.cast.values():
         mark = "returning" if row["appearances"] > 1 else "new"

@@ -1,6 +1,7 @@
 {
   "manifest": 1,
   "id": "story-lantern",
+  "version": "0.1.3",
   "name": "Story Lantern",
   "version": "0.1.2",
   "tagline": "A bedside lamp your kid talks to.",
@@ -14,8 +15,8 @@
   "needs": {
     "models": [
       {"id": "deepreinforce-ai/Ornith-1.0-35B", "npu": 50,
-       "role": "writes the story, and checks every page before a child hears it",
-       "required": true},
+       "role": "writes the story, and checks every page before a child hears it. Preferred, not required: any chat model the device is holding will tell the story, and the lantern picks the best one in the list when a story starts",
+       "required": false},
       {"id": "Tongyi-MAI/Z-Image-Turbo", "npu": 32,
        "role": "paints each page, 512x512, about 8 seconds",
        "required": true},
