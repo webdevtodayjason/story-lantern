@@ -3,7 +3,6 @@
   "id": "story-lantern",
   "version": "0.1.3",
   "name": "Story Lantern",
-  "version": "0.1.2",
   "tagline": "A bedside lamp your kid talks to.",
   "description": "They ask for a story. Half a minute later a painted page appears in an open book and a warm voice starts reading one that has never existed before. Their characters come back next time looking and acting the same.",
   "author": {"name": "Jason Brashear", "github": "webdevtodayjason"},
