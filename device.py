@@ -122,6 +122,29 @@ def key_from_env() -> str:
     return (os.environ.get("TIINY_KEY") or farm_device().get("key") or "").strip()
 
 
+def account_auth_key(addr: str, serial: str, password: str) -> str:
+    """The device's own static API key, straight from the box, no TiinyOS.
+
+    POST /api/v1/account/auth (password + serial), Host: auth.api.tiiny,
+    unlocks /data and hands back `auth_key` -- the same 36-char UUID
+    key_from_env() looks for. Confirmed 2026-09-24 against a live device.
+    Full writeup: ~/code/tiiny/tools/README-unlock.md. Returns "" rather
+    than raising on any failure -- the caller decides what "no key" means.
+    """
+    body = json.dumps({"password": password, "device_id": serial}).encode()
+    req = urllib.request.Request(
+        "http://%s/api/v1/account/auth" % addr, data=body, method="POST",
+        headers={"Content-Type": "application/json", "Host": "auth.api.tiiny",
+                 "x-device-id": serial, "accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+            ValueError, OSError):
+        return ""
+    return (out.get("auth_key") or "").strip()
+
+
 # ---------------------------------------------------------------------------
 # the transport
 # ---------------------------------------------------------------------------

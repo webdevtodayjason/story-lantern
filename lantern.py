@@ -56,6 +56,7 @@ THE THREE IDEAS THIS FILE IS BUILT ON
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import http.server
 import itertools
@@ -3588,6 +3589,26 @@ def require_device() -> None:
         dev = CFG.device()
     except device.NotFound as exc:
         sys.exit("  " + str(exc))
+    if not dev.key and dev.host and dev.serial and sys.stdin.isatty():
+        # No TIINY_KEY, no farm file, and nothing pasted in. The box's own
+        # account API hands the same key over directly -- no TiinyOS needed.
+        # See ~/code/tiiny/tools/README-unlock.md. Deliberately not saved
+        # anywhere: this module resolves everything fresh each run by
+        # design, and TIINY_KEY for just this process respects that.
+        print("  No API key found. This box's own account can hand one "
+              "over -- no TiinyOS needed.")
+        try:
+            password = getpass.getpass("  Tiiny main password (not echoed): ")
+        except (EOFError, KeyboardInterrupt):
+            password = ""
+        got = device.account_auth_key(dev.host, dev.serial, password) if password else ""
+        del password
+        if got:
+            os.environ["TIINY_KEY"] = got
+            device.forget()
+            dev = CFG.device()
+        else:
+            print("  That didn't work. Falling through to the usual error.")
     log(f"device {dev.describe()}")
     if not dev.key:
         sys.exit("Set TIINY_KEY, or let the farm write ~/.tiinyapps/device.json. "
