@@ -81,7 +81,7 @@ from datetime import datetime, timezone
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 import device  # noqa: E402  - beside this file, not a package
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 # --------------------------------------------------------------------------
 # Configuration
